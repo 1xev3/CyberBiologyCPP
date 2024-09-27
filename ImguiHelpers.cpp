@@ -5,6 +5,7 @@
 #include "GLFW/glfw3.h"
 #include <stdio.h>
 #include <iostream>
+#include "ImguiHelpers.h"
 
 using namespace std;
 
@@ -88,6 +89,10 @@ int ScrH() {
     return GetVideoMode()->height;
 }
 
+float DPI() {
+    return ScrW() / 1920.0f;
+}
+
 GLFWwindow* InitImgui(int width, int height) {
 
 #if defined(IMGUI_IMPL_OPENGL_ES2)
@@ -134,9 +139,7 @@ GLFWwindow* InitImgui(int width, int height) {
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
 
-    float dpi = ScrW() / 1920.0f;
-
-    ImFont* custom_font = io.Fonts->AddFontFromFileTTF("fonts/amsterdam.ttf", 20.0f * dpi);
+    ImFont* custom_font = io.Fonts->AddFontFromFileTTF("fonts/amsterdam.ttf", 16.0f * DPI());
     if (!custom_font)
     {
         printf("Failed to load font");

@@ -5,5 +5,6 @@
 GLFWwindow* InitImgui(int width, int height);
 void ImguiRender(GLFWwindow* window);
 void ImguiShutdown(GLFWwindow* window);
+const GLFWvidmode* GetVideoMode();
 int ScrW();
 int ScrH();
