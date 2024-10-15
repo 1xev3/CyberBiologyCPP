@@ -14,18 +14,27 @@
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
     <Filter Include="imgui">
-      <UniqueIdentifier>{fa6cb605-e3b6-4871-ad84-4d23a3d97a18}</UniqueIdentifier>
+      <UniqueIdentifier>{9263420e-a875-480f-90af-7378e8651f61}</UniqueIdentifier>
     </Filter>
-    <Filter Include="glfw">
-      <UniqueIdentifier>{ec68a725-3354-4b96-8341-706eab1dbbc0}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="khr">
-      <UniqueIdentifier>{5f7ded02-b184-4047-8434-a4dc4fe6f087}</UniqueIdentifier>
+    <Filter Include="GLFW">
+      <UniqueIdentifier>{eb1a1869-1523-4bf8-9670-11c7ab89ad7c}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp">
       <Filter>Исходные файлы</Filter>
+    </ClCompile>
+    <ClCompile Include="include\glfw\gl3w.c">
+      <Filter>GLFW</Filter>
+    </ClCompile>
+    <ClCompile Include="Helpers.cpp">
+      <Filter>Исходные файлы</Filter>
+    </ClCompile>
+    <ClCompile Include="include\imgui\imgui_tables.cpp">
+      <Filter>imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="include\imgui\imgui_widgets.cpp">
+      <Filter>imgui</Filter>
     </ClCompile>
     <ClCompile Include="include\imgui\imgui.cpp">
       <Filter>imgui</Filter>
@@ -36,19 +45,10 @@
     <ClCompile Include="include\imgui\imgui_draw.cpp">
       <Filter>imgui</Filter>
     </ClCompile>
-    <ClCompile Include="include\imgui\imgui_impl_glfw.cpp">
-      <Filter>imgui</Filter>
-    </ClCompile>
     <ClCompile Include="include\imgui\imgui_impl_opengl3.cpp">
       <Filter>imgui</Filter>
     </ClCompile>
-    <ClCompile Include="include\imgui\imgui_tables.cpp">
-      <Filter>imgui</Filter>
-    </ClCompile>
-    <ClCompile Include="include\imgui\imgui_widgets.cpp">
-      <Filter>imgui</Filter>
-    </ClCompile>
-    <ClCompile Include="include\imgui\implot.cpp">
+    <ClCompile Include="include\imgui\imgui_impl_glfw.cpp">
       <Filter>imgui</Filter>
     </ClCompile>
     <ClCompile Include="include\imgui\implot_demo.cpp">
@@ -57,14 +57,44 @@
     <ClCompile Include="include\imgui\implot_items.cpp">
       <Filter>imgui</Filter>
     </ClCompile>
-    <ClCompile Include="include\glfw\gl3w.c">
-      <Filter>glfw</Filter>
+    <ClCompile Include="include\imgui\implot.cpp">
+      <Filter>imgui</Filter>
     </ClCompile>
-    <ClCompile Include="ImguiHelpers.cpp">
+    <ClCompile Include="Bot.cpp">
+      <Filter>Исходные файлы</Filter>
+    </ClCompile>
+    <ClCompile Include="World.cpp">
+      <Filter>Исходные файлы</Filter>
+    </ClCompile>
+    <ClCompile Include="config.cpp">
       <Filter>Исходные файлы</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="config.h">
+      <Filter>Файлы заголовков</Filter>
+    </ClInclude>
+    <ClInclude Include="include\glfw\glfw3.h">
+      <Filter>GLFW</Filter>
+    </ClInclude>
+    <ClInclude Include="include\glfw\glfw3native.h">
+      <Filter>GLFW</Filter>
+    </ClInclude>
+    <ClInclude Include="Helpers.h">
+      <Filter>Файлы заголовков</Filter>
+    </ClInclude>
+    <ClInclude Include="include\imgui\imgui_internal.h">
+      <Filter>imgui</Filter>
+    </ClInclude>
+    <ClInclude Include="include\imgui\imstb_rectpack.h">
+      <Filter>imgui</Filter>
+    </ClInclude>
+    <ClInclude Include="include\imgui\imstb_textedit.h">
+      <Filter>imgui</Filter>
+    </ClInclude>
+    <ClInclude Include="include\imgui\imstb_truetype.h">
+      <Filter>imgui</Filter>
+    </ClInclude>
     <ClInclude Include="include\imgui\imconfig.h">
       <Filter>imgui</Filter>
     </ClInclude>
@@ -80,51 +110,33 @@
     <ClInclude Include="include\imgui\imgui_impl_opengl3_loader.h">
       <Filter>imgui</Filter>
     </ClInclude>
-    <ClInclude Include="include\imgui\imgui_internal.h">
+    <ClInclude Include="include\imgui\implot_internal.h">
       <Filter>imgui</Filter>
     </ClInclude>
     <ClInclude Include="include\imgui\implot.h">
       <Filter>imgui</Filter>
     </ClInclude>
-    <ClInclude Include="include\imgui\implot_internal.h">
-      <Filter>imgui</Filter>
+    <ClInclude Include="Bot.h">
+      <Filter>Файлы заголовков</Filter>
     </ClInclude>
-    <ClInclude Include="include\imgui\imstb_rectpack.h">
-      <Filter>imgui</Filter>
-    </ClInclude>
-    <ClInclude Include="include\imgui\imstb_textedit.h">
-      <Filter>imgui</Filter>
-    </ClInclude>
-    <ClInclude Include="include\imgui\imstb_truetype.h">
-      <Filter>imgui</Filter>
-    </ClInclude>
-    <ClInclude Include="include\glfw\glfw3.h">
-      <Filter>glfw</Filter>
-    </ClInclude>
-    <ClInclude Include="include\glfw\glfw3native.h">
-      <Filter>glfw</Filter>
-    </ClInclude>
-    <ClInclude Include="include\KHR\khrplatform.h">
-      <Filter>khr</Filter>
-    </ClInclude>
-    <ClInclude Include="ImguiHelpers.h">
+    <ClInclude Include="World.h">
       <Filter>Файлы заголовков</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <None Include="include\glfw\glfw3.dll">
-      <Filter>glfw</Filter>
-    </None>
-  </ItemGroup>
-  <ItemGroup>
     <Library Include="include\glfw\glfw3.lib">
-      <Filter>glfw</Filter>
+      <Filter>GLFW</Filter>
     </Library>
     <Library Include="include\glfw\glfw3_mt.lib">
-      <Filter>glfw</Filter>
+      <Filter>GLFW</Filter>
     </Library>
     <Library Include="include\glfw\glfw3dll.lib">
-      <Filter>glfw</Filter>
+      <Filter>GLFW</Filter>
     </Library>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="include\glfw\glfw3.dll">
+      <Filter>GLFW</Filter>
+    </None>
   </ItemGroup>
 </Project>

@@ -29,8 +29,7 @@
 #ifndef __gl3w_h_
 #define __gl3w_h_
 
-#include "glcorearb.h"
-//#include <GL/glcorearb.h>
+#include <GL/glcorearb.h>
 
 #ifndef GL3W_API
 #define GL3W_API
