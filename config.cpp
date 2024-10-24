@@ -14,7 +14,7 @@ float LIVE_COST = 10.0f;
 float EAT_COST = 4.0f;
 float GENE_ATTACK_COST = 5.0f;
 int MAX_GENE_DIFFERENCE = 2;
-int MAX_AGE = 500;
+int MAX_AGE = 2000;
 float MAX_ENERGY = 1000.0f;
 float MAX_MINERAL = 1000.0f;
 
@@ -22,4 +22,4 @@ float MAX_MINERAL = 1000.0f;
 int MASK_CYCLES = 3;
 float MASK_ENERGY_COST = 15.0f;
 
-float MUTATION_CHANCE = 0.20f;
+float MUTATION_CHANCE = 0.1f;

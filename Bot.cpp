@@ -36,9 +36,9 @@ bool Bot::isRelative(Bot* bot1) {
 void Bot::Mask() {
     mask = MASK_CYCLES;
     energy -= MASK_ENERGY_COST;
-    goRed(250);
-    goGreen(250);
-    goBlue(250);
+    goRed(5);
+    goGreen(5);
+    goBlue(5);
 }
 
 int Bot::xFromVektorR(int n) {
@@ -124,7 +124,7 @@ int Bot::Eat() {
         float energy2add = (world->matrix[yt][xt]->energy);
         deleteBot(world->matrix[yt][xt]);                        // то удаляем её из списков
         energy += energy2add;          //здоровье увеличилось на 100
-        goRed(100);               // бот покраснел
+        goRed(50);               // бот покраснел
         return 4;                       // возвращаем 4
     }
 
@@ -132,26 +132,32 @@ int Bot::Eat() {
     //Дошли до сюда, впереди живой бот.
     Bot* target = world->matrix[yt][xt];
 
+    energy += target->energy;
+    mineral += target->mineral;
+    goRed(50);
+    deleteBot(target);
+
+
     //Если у текущего бота больше энергии, чем половины у цели то бот сьедает его.
-    if (energy > (target->energy / 2.0f)) {
-        //Если у цели есть маскировка, то
-        if ((target->mask > 0)) {
-            energy = (energy - (target->energy / 2.0f));
-            target->energy = target->energy / 2.0f - EAT_COST;
-            target->mineral = target->mineral / 3.0f;
-            goRed(50);
-            return 5;
-        }
+    //if (energy > (target->energy / 2.0f)) {
+    //    //Если у цели есть маскировка, то
+    //    if ((target->mask > 0)) {
+    //        energy = (energy - (target->energy / 2.0f));
+    //        target->energy = target->energy / 2.0f - EAT_COST;
+    //        target->mineral = target->mineral / 3.0f;
+    //        goRed(50);
+    //        return 5;
+    //    }
 
 
-        energy += target->energy;
-        mineral += target->mineral;
-        goRed(200);
-        deleteBot(target);
-    }
-    else {
-        energy = energy / 2.0f;
-    }
+    //    energy += target->energy;
+    //    mineral += target->mineral;
+    //    goRed(200);
+    //    deleteBot(target);
+    //}
+    //else {
+    //    energy = energy / 2.0f;
+    //}
 
     return 5;
 }
@@ -366,7 +372,7 @@ void Bot::Photo() {
 
     // Пропорционально высоте, чем выше, тем больше энергии.
     energy += (inverted_y * energy_per_level) / 6; 
-    goGreen((int)((inverted_y * energy_per_level) / 6));
+    goGreen(5);
 }
 
 void Bot::MineralGain() {
@@ -376,7 +382,7 @@ void Bot::MineralGain() {
     //mineral += (y * energy_per_level) / 10;
 
     energy += (y * energy_per_level) / 6;
-    goBlue((y * energy_per_level) / 6);
+    goBlue(5);
 }
 
 void Bot::BotToOrganic() {
@@ -568,50 +574,50 @@ void Bot::step() {
         }
                 //Сьесть в относительном направлении
         case 34: {
-            JmpAdr(Eat());
+            IncAdr(Eat());
             breakflag = 1;
             break;
         }
                 //Отдать энергию
         case 36:
         case 37: {
-            JmpAdr(Give());
+            IncAdr(Give());
             breakflag = 1;
             break;
         }
                 //распределить энергию в относительном направлении:
         case 38:
         case 39: {
-            JmpAdr(Care());
+            IncAdr(Care());
             breakflag = 1;
             break;
         }
                 //Посмотреть с параметром
         case 40: {
-            JmpAdr(SeeBots());
+            IncAdr(SeeBots());
             break;
         }
                 //Проверка высоты
         case 41: {
-            JmpAdr(checkLevel());
+            IncAdr(checkLevel());
             break;
         }
                 //Проверка уровня энергии
         case 42: {
-            JmpAdr(checkEnergy());
+            IncAdr(checkEnergy());
             break;
         }
         case 43: {
-            JmpAdr(checkMineral());
+            IncAdr(checkMineral());
             break;
         }
         case 44: {
-            JmpAdr(checkAge());
+            IncAdr(checkAge());
             break;
         }
                 //Окружён ли бот?
         case 46: {
-            JmpAdr(isFullAround());
+            IncAdr(isFullAround());
             break;
         }
                 //Генетическая атака.

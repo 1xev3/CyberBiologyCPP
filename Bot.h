@@ -2,6 +2,7 @@
 
 #include "config.h"
 #include "Helpers.h"
+#include <iostream>
 #include <filesystem>
 #include <fstream>
 

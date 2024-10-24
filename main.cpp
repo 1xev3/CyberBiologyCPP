@@ -47,6 +47,9 @@ void SimulationThread(World& world, atomic<bool>& terminate, bool& pause, int& s
     {
         if (!pause)
         {
+            double sinf = -sin(ImGui::GetTime() * 0.2f) + 0.3f;
+            LIVE_COST = 13 + 4 * sinf;
+
             mtx.lock();
             Bot* target;
             for (int row = 0; row < world.height; row++) {
@@ -238,16 +241,16 @@ int main() {
                             break;
                         case Display::dRELATIVE: {
                             ImVec4 family = target->GetFamily();
+                            if (target->GetState() == BotState::LV_ORGANIC) {
+                                family.x = target->Red();
+                                family.y = target->Green();
+                                family.z = target->Blue();
+                            }
                             dl->AddRectFilled(
                                 ImVec2(pos.x + col * cell_size-1, pos.y + row * cell_size),
                                 ImVec2(pos.x + col * cell_size + cell_size, pos.y + row * cell_size + cell_size+1),
                                 IM_COL32((int)family.x, (int)family.y, (int)family.z, (int)family.w)
                             );
-                            //dl->AddRectFilled(
-                            //    ImVec2(pos.x + col * cell_size + CELL_GAP, pos.y + row * cell_size + CELL_GAP),
-                            //    ImVec2(pos.x + col * cell_size + cell_size - CELL_GAP, pos.y + row * cell_size + cell_size - CELL_GAP),
-                            //    IM_COL32(20, 0, 0, 255)
-                            //);
                             break;
                         }
                         case Display::dAGE: {
@@ -532,13 +535,13 @@ int main() {
             if (ImGui::Button("Copy to clipboard")) {
                 copied_bot = selected_bot;
             }
-            ImGui::SameLine();
-            if (ImGui::Button("Save to file")) {
-                selected_bot.SaveToFile(bot_filename);
+            //ImGui::SameLine();
+            //if (ImGui::Button("Save to file")) {
+            //    selected_bot.SaveToFile(bot_filename);
 
-                selected_bot.x = -1;
-                selected_bot.y = -1;
-            }
+            //    selected_bot.x = -1;
+            //    selected_bot.y = -1;
+            //}
 
             ImGui::SeparatorText("Info");
             ImGui::Text("X:%d Y:%d\nEnergy:%.2f\nMineral %.2f", selected_bot.GetX(), selected_bot.GetY(), selected_bot.GetEnergy(), selected_bot.mineral);
