@@ -44,8 +44,8 @@ int main() {
 
     ImPlot::CreateContext();
 
-    const int gridW = roundTo3(600);
-    const int gridH = roundTo3(400);
+    const int gridW = roundTo3(1200);
+    const int gridH = roundTo3(800);
     Simulation sim(gridW, gridH);   // CPU side: seeding, save/load, editing only
     sim.generate();
 
@@ -187,78 +187,82 @@ int main() {
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Wheel = zoom, middle-drag (or left-drag with no tool) = pan");
 
-        if (ImGui::CollapsingHeader("Life", ImGuiTreeNodeFlags_DefaultOpen)) {
-            ImGui::SliderFloat("Photosynthesis", &sim.cfg.photoEnergy, 0.0f, 20.0f);
-            ImGui::SliderFloat("Mineral rate", &sim.cfg.mineralRate, 0.0f, 20.0f);
-            ImGui::SliderFloat("Live cost", &sim.cfg.liveCost, 0.0f, 10.0f);
-            ImGui::SliderFloat("Divide cost", &sim.cfg.doubleCost, 10.0f, 500.0f);
-            ImGui::SliderInt("Max age", &sim.cfg.maxAge, 100, 20000);
-            ImGui::SliderInt("Kin color dist", &sim.cfg.kinColorDist, 0, 128);
-        }
-
-        if (ImGui::CollapsingHeader("Evolution")) {
-            ImGui::SliderFloat("Mutation chance", &sim.cfg.mutationChance, 0.0f, 1.0f);
-            ImGui::SliderInt("Mutation count", &sim.cfg.mutationCount, 1, 32);
-            ImGui::SliderInt("Mutation delta", &sim.cfg.mutationDelta, 1, 64);
-        }
-
-        if (ImGui::CollapsingHeader("Environment")) {
-            ImGui::SliderFloat("Patch scale", &sim.cfg.envScale, 1.0f, 24.0f);
-            ImGui::SliderFloat("Patch drift", &sim.cfg.envDrift, 0.0f, 0.5f);
-            ImGui::SliderFloat("Day/night speed", &sim.cfg.dayNightSpeed, 0.0f, 0.2f);
-        }
-
-        if (ImGui::CollapsingHeader("World gen")) {
-            ImGui::SliderFloat("Spawn chance", &sim.cfg.spawnChance, 0.0f, 1.0f);
-            ImGui::SliderFloat("Instinct fraction", &sim.cfg.instinctFraction, 0.0f, 1.0f);
-        }
-
-        if (ImGui::CollapsingHeader("Display", ImGuiTreeNodeFlags_DefaultOpen)) {
-            int m0 = (int)mode;
-            ImGui::RadioButton("Family / clan", &m0, (int)DisplayMode::Family);
-            ImGui::RadioButton("Energy", &m0, (int)DisplayMode::Energy);
-            ImGui::RadioButton("Age", &m0, (int)DisplayMode::Age);
-            ImGui::RadioButton("Environment", &m0, (int)DisplayMode::Environment);
-            mode = (DisplayMode)m0;
-        }
-
-        if (ImGui::CollapsingHeader("Tools")) {
-            int t0 = (int)tool;
-            ImGui::RadioButton("None##t", &t0, (int)Tool::None);
-            ImGui::RadioButton("Spawn", &t0, (int)Tool::Spawn);
-            ImGui::RadioButton("Erase", &t0, (int)Tool::Erase);
-            tool = (Tool)t0;
-            ImGui::SliderInt("Brush radius", &brushRadius, 0, 40);
-        }
-
-        if (ImGui::CollapsingHeader("Save / Load")) {
-            ImGui::InputText("File", saveName.data(), saveName.capacity());
-            if (ImGui::Button("Save")) {
-                syncDown();
-                saveWorld(sim.world, std::string(kSaveDir) + "/" + saveName.c_str());
+        if (ImGui::BeginTabBar("tabs")) {
+            if (ImGui::BeginTabItem("Life")) {
+                ImGui::SliderFloat("Photosynthesis", &sim.cfg.photoEnergy, 0.0f, 20.0f);
+                ImGui::SliderFloat("Mineral rate", &sim.cfg.mineralRate, 0.0f, 20.0f);
+                ImGui::SliderFloat("Metabolism", &sim.cfg.metabolism, 0.0f, 5.0f);
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Energy paid every tick just to stay alive");
+                ImGui::SliderFloat("Action cost", &sim.cfg.actionCost, 0.0f, 5.0f);
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Energy paid for move / eat / give / divide / attack");
+                ImGui::SliderFloat("Divide cost", &sim.cfg.divideCost, 10.0f, 500.0f);
+                ImGui::SliderInt("Max age", &sim.cfg.maxAge, 100, 20000);
+                ImGui::EndTabItem();
             }
-            ImGui::SameLine();
-            if (ImGui::Button("Load")) {
-                if (loadWorld(sim.world, std::string(kSaveDir) + "/" + saveName.c_str())) {
-                    worldSynced = true;
-                    if (gpuOk) gpu.upload(sim.world);
+            if (ImGui::BeginTabItem("Evolution")) {
+                ImGui::SliderFloat("Mutation rate", &sim.cfg.mutationChance, 0.0f, 1.0f);
+                ImGui::SliderInt("Mutation size", &sim.cfg.mutationDelta, 1, 64);
+                ImGui::SliderInt("Kin distance", &sim.cfg.kinColorDist, 0, 128);
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Environment")) {
+                ImGui::SliderFloat("Patch scale", &sim.cfg.envScale, 1.0f, 24.0f);
+                ImGui::SliderFloat("Patch drift", &sim.cfg.envDrift, 0.0f, 0.01f, "%.4f");
+                ImGui::SliderFloat("Day/night speed", &sim.cfg.dayNightSpeed, 0.0f, 0.02f, "%.4f");
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("World")) {
+                ImGui::SliderFloat("Spawn chance", &sim.cfg.spawnChance, 0.0f, 1.0f);
+                ImGui::SliderFloat("Instinct fraction", &sim.cfg.instinctFraction, 0.0f, 1.0f);
+                ImGui::TextDisabled("(applied on Regenerate)");
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("View")) {
+                int m0 = (int)mode;
+                ImGui::RadioButton("Family / clan", &m0, (int)DisplayMode::Family);
+                ImGui::RadioButton("Energy", &m0, (int)DisplayMode::Energy);
+                ImGui::RadioButton("Age", &m0, (int)DisplayMode::Age);
+                ImGui::RadioButton("Environment", &m0, (int)DisplayMode::Environment);
+                mode = (DisplayMode)m0;
+                ImGui::Separator();
+                int t0 = (int)tool;
+                ImGui::TextUnformatted("Brush");
+                ImGui::RadioButton("None##t", &t0, (int)Tool::None); ImGui::SameLine();
+                ImGui::RadioButton("Spawn", &t0, (int)Tool::Spawn); ImGui::SameLine();
+                ImGui::RadioButton("Erase", &t0, (int)Tool::Erase);
+                tool = (Tool)t0;
+                ImGui::SliderInt("Brush radius", &brushRadius, 0, 40);
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Data")) {
+                ImGui::InputText("File", saveName.data(), saveName.capacity());
+                if (ImGui::Button("Save")) {
+                    syncDown();
+                    saveWorld(sim.world, std::string(kSaveDir) + "/" + saveName.c_str());
                 }
+                ImGui::SameLine();
+                if (ImGui::Button("Load")) {
+                    if (loadWorld(sim.world, std::string(kSaveDir) + "/" + saveName.c_str())) {
+                        worldSynced = true;
+                        if (gpuOk) gpu.upload(sim.world);
+                    }
+                }
+                ImGui::Separator();
+                plotT += ImGui::GetIO().DeltaTime;
+                popBuf.AddPoint(plotT, (float)alive);
+                static float history = 10.0f;
+                ImGui::SliderFloat("History", &history, 1, 60, "%.0f s");
+                if (ImPlot::BeginPlot("##pop", ImVec2(-1, 150))) {
+                    ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_NoTickLabels, 0);
+                    ImPlot::SetupAxisLimits(ImAxis_X1, plotT - history, plotT, ImGuiCond_Always);
+                    ImPlot::SetupAxisLimits(ImAxis_Y1, 0, maxAlive + 100, ImPlotCond_Always);
+                    ImPlot::PlotLine("Population", &popBuf.Data[0].x, &popBuf.Data[0].y,
+                                     popBuf.Data.size(), 0, popBuf.Offset, 2 * sizeof(float));
+                    ImPlot::EndPlot();
+                }
+                ImGui::EndTabItem();
             }
-        }
-
-        if (ImGui::CollapsingHeader("Population")) {
-            plotT += ImGui::GetIO().DeltaTime;
-            popBuf.AddPoint(plotT, (float)alive);
-            static float history = 10.0f;
-            ImGui::SliderFloat("History", &history, 1, 60, "%.0f s");
-            if (ImPlot::BeginPlot("##pop", ImVec2(-1, 150))) {
-                ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_NoTickLabels, 0);
-                ImPlot::SetupAxisLimits(ImAxis_X1, plotT - history, plotT, ImGuiCond_Always);
-                ImPlot::SetupAxisLimits(ImAxis_Y1, 0, maxAlive + 100, ImPlotCond_Always);
-                ImPlot::PlotLine("Population", &popBuf.Data[0].x, &popBuf.Data[0].y,
-                                 popBuf.Data.size(), 0, popBuf.Offset, 2 * sizeof(float));
-                ImPlot::EndPlot();
-            }
+            ImGui::EndTabBar();
         }
         ImGui::End();
 

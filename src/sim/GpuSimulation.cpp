@@ -29,7 +29,7 @@ layout(std430, binding=6) buffer B6 { uint  fam[]; };
 
 uniform int  uW, uH, uPhase, uActW, uActH;
 uniform uint uTick, uSeed;
-uniform float uPhoto, uMineralRate, uLiveCost, uEatCost, uDoubleCost, uGeneAtt,
+uniform float uPhoto, uMineralRate, uMetab, uActionCost, uDivide,
               uMaxEnergy, uMaxMineral, uStartEnergy, uMutChance,
               uTime, uEnvScale, uEnvDrift, uDayNight;
 uniform int  uKinDist, uMaxAge, uMutCount, uMutDelta;
@@ -73,7 +73,7 @@ float vnoise(vec2 p){ vec2 i=floor(p),f=fract(p); f=f*f*(3.0-2.0*f);
     float a=hash21(i),b=hash21(i+vec2(1,0)),c=hash21(i+vec2(0,1)),d=hash21(i+vec2(1,1));
     return mix(mix(a,b,f.x),mix(c,d,f.x),f.y); }
 float fbm(vec2 p){ float s=0.0,a=0.5; for(int o=0;o<4;o++){ s+=a*vnoise(p); p*=2.0; a*=0.5; } return s; }
-float dayMul(){ return (uDayNight>0.0001) ? (0.5+0.5*sin(uTime*uDayNight)) : 1.0; }
+float dayMul(){ return (uDayNight>0.0001) ? (0.7+0.3*sin(uTime*uDayNight)) : 1.0; }
 float lightAt(int x,int y){ vec2 uv=vec2(float(x),float(y))/float(uH);
     float pv=fbm(uv*uEnvScale + vec2(uTime*uEnvDrift,0.0));
     float vgrad=1.0 - float(y)/float(uH)*0.5;
@@ -98,7 +98,6 @@ void photo(int i,int x,int y){ energy[i]+= uPhoto*lightAt(x,y); }
 void mineralG(int i,int x,int y){ energy[i]+= uMineralRate*mineralAt(x,y); }
 
 void doEat(int i,int x,int y){ uint f=dir[i]; int xt=frontX(x,f),yt=frontY(y,f);
-    energy[i]-=uEatCost;
     if(yt<0||yt>=uH) return; int j=idx(xt,yt);
     if(kind[j]==0u) return;
     if(kind[j]==2u){ energy[i]+=energy[j]; kind[j]=0u; return; }
@@ -117,9 +116,9 @@ void mutateChild(int j){
         b += rint(2*uMutDelta+1)-uMutDelta; b=clamp(b,-128,127); setByte(j,k,b); }
     int r,g,bb; unpackFam(fam[j],r,g,bb); r+=rint(13)-6; g+=rint(13)-6; bb+=rint(13)-6; fam[j]=packFam(r,g,bb); }
 
-void doDouble(int i,int x,int y){ if(energy[i]<uDoubleCost) return;
+void doDouble(int i,int x,int y){ if(energy[i]<uDivide) return;
     int n=findEmpty(x,y,dir[i]); if(n==8) return;
-    energy[i]-=uDoubleCost;
+    energy[i]-=uDivide;
     int xt=nbX(x,dir[i],n),yt=nbY(y,dir[i],n); int j=idx(xt,yt);
     kind[j]=1u; dir[j]=dir[i]; age[j]=0; fam[j]=fam[i];
     for(int k=0;k<GW;k++) genome[j*GW+k]=genome[i*GW+k];
@@ -128,7 +127,7 @@ void doDouble(int i,int x,int y){ if(energy[i]<uDoubleCost) return;
 
 void doAttack(int i,int x,int y){ uint f=dir[i]; int xt=frontX(x,f),yt=frontY(y,f);
     if(yt<0||yt>=uH) return; int j=idx(xt,yt); if(kind[j]!=1u) return;
-    energy[i]-=uGeneAtt; int k=rint(GN); setByte(j,k,gbyte(i,k)); }
+    int k=rint(GN); setByte(j,k,gbyte(i,k)); }
 
 void main(){
     uint t = gl_GlobalInvocationID.x;
@@ -188,6 +187,10 @@ void main(){
     int act=0; float best=o[0];
     for(int a=1;a<9;a++){ if(o[a]>best){ best=o[a]; act=a; } }
 
+    // active actions (move/eat/give/divide/attack) cost energy; photo/mineral/
+    // rotate/idle only pay the per-tick metabolism below.
+    if(act==1||act==5||act==6||act==7||act==8) energy[i]-=uActionCost;
+
     if(act==1) doMove(i,cx,cy);
     else if(act==2) rotate(i,o[9]);
     else if(act==3) photo(i,cx,cy);
@@ -199,20 +202,21 @@ void main(){
 
     if(kind[i]!=1u) return;             // may have moved away
     if(energy[i]>uMaxEnergy) energy[i]=uMaxEnergy;
-    energy[i]-=uLiveCost; age[i]+=1;
+    energy[i]-=uMetab; age[i]+=1;
     if(energy[i]<=0.0){ kind[i]=0u; return; }
     if(age[i]>uMaxAge) kind[i]=2u;      // die of old age -> organic
 }
 )GLSL";
 
-// Colorize pass: state -> RGBA8, with an atomic alive counter.
-static const char* kColorSrc = R"GLSL(
-#version 430
+// Colorize pass: state -> RGBA8, with an atomic alive counter. The #version and
+// topology #defines are prepended at compile time (shared with the sim shader).
+static const char* kColorBody = R"GLSL(
 layout(local_size_x=8, local_size_y=8) in;
 layout(rgba8, binding=0) uniform writeonly image2D uOut;
 layout(std430, binding=0) buffer B0 { uint  kind[]; };
 layout(std430, binding=2) buffer B2 { int   age[]; };
 layout(std430, binding=3) buffer B3 { float energy[]; };
+layout(std430, binding=5) buffer B5 { uint  genome[]; };
 layout(std430, binding=6) buffer B6 { uint  fam[]; };
 layout(std430, binding=7) buffer BC { uint  aliveCount[]; };
 
@@ -225,13 +229,33 @@ float vnoise(vec2 p){ vec2 i=floor(p),f=fract(p); f=f*f*(3.0-2.0*f);
     float a=hash21(i),b=hash21(i+vec2(1,0)),c=hash21(i+vec2(0,1)),d=hash21(i+vec2(1,1));
     return mix(mix(a,b,f.x),mix(c,d,f.x),f.y); }
 float fbm(vec2 p){ float s=0.0,a=0.5; for(int o=0;o<4;o++){ s+=a*vnoise(p); p*=2.0; a*=0.5; } return s; }
-float dayMul(){ return (uDayNight>0.0001) ? (0.5+0.5*sin(uTime*uDayNight)) : 1.0; }
+float dayMul(){ return (uDayNight>0.0001) ? (0.7+0.3*sin(uTime*uDayNight)) : 1.0; }
 float lightAt(int x,int y){ vec2 uv=vec2(float(x),float(y))/float(uH);
     float pv=fbm(uv*uEnvScale + vec2(uTime*uEnvDrift,0.0));
     return clamp(pv*(1.0-float(y)/float(uH)*0.5)*dayMul(),0.0,1.0); }
 float mineralAt(int x,int y){ vec2 uv=vec2(float(x),float(y))/float(uH);
     float pv=fbm(uv*uEnvScale + vec2(13.7,7.3) - vec2(0.0,uTime*uEnvDrift));
     return clamp(pv*(0.5+float(y)/float(uH)*0.5),0.0,1.0); }
+
+// Genome fingerprint color: project the weight vector onto 3 fixed pseudo-random
+// directions -> RGB. Continuous, so similar genomes get similar colors and very
+// different genomes get very different colors. This makes the clan view reflect
+// real genetic distance rather than the (drifting) kin tag.
+int  gbyte(int i,int k){ return int((genome[i*GW + (k>>2)] >> uint((k&3)*8)) & 0xFFu); }
+float wt(int i,int k){ int b=gbyte(i,k); if(b>127) b-=256; return float(b)*WSCALE; }
+float projw(int k,int c){ uint h=uint(k)*747796405u + uint(c)*2891336453u;
+    h^=h>>15; h*=2246822519u; h^=h>>13; return float(h & 0xFFFFu)*(1.0/65535.0)*2.0 - 1.0; }
+vec3 genomeColor(int i){ float a=0.0,b=0.0,d=0.0;
+    for(int k=0;k<GN;k++){ float w=wt(i,k); a+=w*projw(k,0); b+=w*projw(k,1); d+=w*projw(k,2); }
+    vec3 c = clamp(vec3(0.5) + 0.20*vec3(a,b,d), 0.0, 1.0);
+    float l = dot(c, vec3(0.299,0.587,0.114));   // luminance
+    c = mix(vec3(l), c, 0.6);                     // desaturate toward gray
+    c = mix(c, vec3(0.8), 0.12);                  // soft pastel lift
+    return c; }
+// Environment shown under cells. Brightness = how good the spot is (light +
+// minerals). Kept dim so living cells stand out on top.
+vec3 envColor(int x,int y){ float L=lightAt(x,y), M=mineralAt(x,y);
+    return vec3(L*0.9, L*0.7+M*0.25, M*0.9); }
 
 void main(){
     ivec2 p = ivec2(gl_GlobalInvocationID.xy);
@@ -240,16 +264,20 @@ void main(){
     uint k = kind[i];
     if(k==1u) atomicAdd(aliveCount[0], 1u);
 
-    vec3 c = vec3(0.118);
-    if(uMode==3){                                    // Environment field
-        float L=lightAt(p.x,p.y), M=mineralAt(p.x,p.y);
-        c = vec3(L*0.85, L*0.85*0.6, M*0.85);
-        if(k==1u) c = mix(c, rgb(fam[i]), 0.6);
-    } else if(k!=0u){
-        if(k==2u)               c = vec3(0.25);      // organic / dead
-        else if(uMode==0)       c = rgb(fam[i]);     // Family / clan
-        else if(uMode==1){ float e=energy[i]; c=vec3(min(e/1000.0,1.0), min(e/2000.0,1.0)*0.647, 0.0); }
-        else if(uMode==2){ float a=clamp(float(age[i])/float(max(uMaxAge,1)),0.0,1.0); c=vec3(a,0.0,a); }
+    vec3 env = envColor(p.x, p.y);
+    vec3 c;
+    if(uMode==3){                                    // Environment: full heatmap
+        c = env;
+        if(k==1u)      c = mix(c, genomeColor(i), 0.75);
+        else if(k==2u) c = mix(c, vec3(0.2), 0.6);
+    } else {
+        c = env * 0.22 + vec3(0.04);                 // dim env background
+        if(k==2u)      c = mix(c, vec3(0.32), 0.85); // organic / dead
+        else if(k==1u){
+            if(uMode==0)      c = genomeColor(i);    // Family / clan (genome)
+            else if(uMode==1){ float e=energy[i]; c=vec3(min(e/1000.0,1.0), min(e/2000.0,1.0)*0.647, 0.0); }
+            else if(uMode==2){ float a=clamp(float(age[i])/float(max(uMaxAge,1)),0.0,1.0); c=vec3(a,0.0,a); }
+        }
     }
     imageStore(uOut, p, vec4(c,1.0));
 }
@@ -257,7 +285,8 @@ void main(){
 
 // ---------------------------------------------------------------------------
 namespace {
-std::string buildSimSrc() {
+// #version + topology #defines shared by both compute shaders.
+std::string shaderHeader() {
     char hdr[512];
     std::snprintf(hdr, sizeof(hdr),
         "#version 430\n"
@@ -269,8 +298,10 @@ std::string buildSimSrc() {
         kNNInputs*kNNHidden,
         kNNInputs*kNNHidden + kNNHidden,
         kNNInputs*kNNHidden + kNNHidden + kNNHidden*kNNOutputs);
-    return std::string(hdr) + kSimBody;
+    return std::string(hdr);
 }
+std::string buildSimSrc()   { return shaderHeader() + kSimBody; }
+std::string buildColorSrc() { return shaderHeader() + kColorBody; }
 
 unsigned compileCompute(const char* src) {
     GLuint sh = glCreateShader(GL_COMPUTE_SHADER);
@@ -307,8 +338,9 @@ GpuSimulation::~GpuSimulation() {
 bool GpuSimulation::init(const WorldState& seed, const Config& cfg) {
     cfg_ = cfg;
     std::string simSrc = buildSimSrc();
+    std::string colorSrc = buildColorSrc();
     simProg_   = compileCompute(simSrc.c_str());
-    colorProg_ = compileCompute(kColorSrc);
+    colorProg_ = compileCompute(colorSrc.c_str());
     if (!simProg_ || !colorProg_) return false;
 
     width_ = seed.width; height_ = seed.height;
@@ -374,8 +406,8 @@ void GpuSimulation::setSimUniforms() {
     auto F = [&](const char* nm, float v){ glUniform1f(glGetUniformLocation(simProg_, nm), v); };
     I("uW", width_); I("uH", height_);
     F("uPhoto", cfg_.photoEnergy); F("uMineralRate", cfg_.mineralRate);
-    F("uLiveCost", cfg_.liveCost); F("uEatCost", cfg_.eatCost);
-    F("uDoubleCost", cfg_.doubleCost); F("uGeneAtt", cfg_.geneAttackCost);
+    F("uMetab", cfg_.metabolism); F("uActionCost", cfg_.actionCost);
+    F("uDivide", cfg_.divideCost);
     F("uMaxEnergy", cfg_.maxEnergy); F("uMaxMineral", cfg_.maxMineral);
     F("uStartEnergy", cfg_.startEnergy); F("uMutChance", cfg_.mutationChance);
     F("uEnvScale", cfg_.envScale); F("uEnvDrift", cfg_.envDrift); F("uDayNight", cfg_.dayNightSpeed);

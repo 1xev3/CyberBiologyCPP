@@ -30,12 +30,11 @@ enum Action {
 // All tunable simulation parameters in one place.
 struct Config {
     float startEnergy       = 120.0f;
-    float photoEnergy       = 6.0f;    // max photosynthesis gain (x light field)
-    float mineralRate       = 6.0f;    // max mineral->energy gain (x mineral field)
-    float doubleCost        = 120.0f;  // energy required/spent to divide
-    float liveCost          = 1.0f;    // metabolic drain per tick
-    float eatCost           = 2.0f;
-    float geneAttackCost    = 3.0f;
+    float photoEnergy       = 4.0f;    // max photosynthesis gain (x light field)
+    float mineralRate       = 4.0f;    // max mineral->energy gain (x mineral field)
+    float metabolism        = 1.0f;    // energy cost of being alive, per tick
+    float actionCost        = 0.5f;    // cost of any active action (move/eat/give/divide/attack)
+    float divideCost        = 120.0f;  // extra energy required/spent to reproduce
     int   kinColorDist      = 24;      // kin if family-color L1 distance <= this
     int   maxAge            = 6000;
     float maxEnergy         = 1000.0f;
@@ -43,13 +42,13 @@ struct Config {
 
     // Evolution
     float mutationChance    = 0.5f;    // chance a division mutates the child
-    int   mutationCount     = 4;       // weights nudged per mutation event
+    int   mutationCount     = 2;       // weights nudged per mutation event
     int   mutationDelta     = 12;      // +/- magnitude of a weight nudge (bytes)
 
     // Environment (animated fBm fields sampled in-shader)
-    float envScale          = 4.0f;    // spatial frequency of resource patches
-    float envDrift          = 0.05f;   // how fast patches move over time
-    float dayNightSpeed     = 0.0f;    // global light cycle speed (0 = off)
+    float envScale          = 2.0f;    // spatial frequency of resource patches
+    float envDrift          = 0.0002f; // how fast patches move (per sim tick)
+    float dayNightSpeed     = 0.0015f; // global light cycle speed (0 = off)
 
     // World generation
     float spawnChance       = 0.15f;
