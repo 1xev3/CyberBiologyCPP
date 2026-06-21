@@ -67,6 +67,7 @@ int main() {
 
     float  zoom = 1.0f;          // 1.0 = fit grid to view
     ImVec2 pan(0.0f, 0.0f);      // pixel offset of the grid within the view
+    bool   recenter = true;      // request to center the grid in the view
 
     bool        paused        = true;
     int         stepsPerFrame = 1;
@@ -143,9 +144,12 @@ int main() {
 
         float scale = fit * zoom;
         ImVec2 imgSize(gridW * scale, gridH * scale);
-        // Keep the grid in view: center when smaller than the viewport, else clamp.
-        pan.x = imgSize.x <= avail.x ? (avail.x - imgSize.x) * 0.5f : clampf(pan.x, avail.x - imgSize.x, 0.0f);
-        pan.y = imgSize.y <= avail.y ? (avail.y - imgSize.y) * 0.5f : clampf(pan.y, avail.y - imgSize.y, 0.0f);
+        if (recenter) { pan = ImVec2((avail.x - imgSize.x) * 0.5f, (avail.y - imgSize.y) * 0.5f); recenter = false; }
+        // Allow the camera to leave the field by up to 3x the field size on each
+        // side, so the grid can be pushed well off the edges.
+        float marginX = imgSize.x * 3.0f, marginY = imgSize.y * 3.0f;
+        pan.x = clampf(pan.x, avail.x - imgSize.x - marginX, marginX);
+        pan.y = clampf(pan.y, avail.y - imgSize.y - marginY, marginY);
 
         ImVec2 imgPos(viewPos.x + pan.x, viewPos.y + pan.y);
         ImGui::SetCursorScreenPos(imgPos);
@@ -205,7 +209,7 @@ int main() {
 
         ImGui::Text("Zoom: %.0f%%", zoom * 100.0f);
         ImGui::SameLine();
-        if (ImGui::Button("Reset view")) { zoom = 1.0f; pan = ImVec2(0, 0); }
+        if (ImGui::Button("Reset view")) { zoom = 1.0f; recenter = true; }
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Wheel = zoom, middle-drag (or left-drag with no tool) = pan");
 
