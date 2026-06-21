@@ -1,5 +1,8 @@
 #include <cstdio>
 #include <cmath>
+#include <cstring>
+#include <chrono>
+#include <thread>
 #include <string>
 #include <vector>
 
@@ -32,7 +35,20 @@ void error_callback(int error, const char* description) {
 
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    // Headless-ish benchmark: --bench [ticks] [gridW gridH]. Runs the GPU sim for
+    // a fixed number of ticks (no GUI render) and prints ms/tick + cells/s, then
+    // exits. Lets us measure simulation throughput objectively.
+    bool bench = false;
+    int  benchTicks = 300, benchW = 0, benchH = 0;
+    for (int a = 1; a < argc; ++a) {
+        if (std::strcmp(argv[a], "--bench") == 0) {
+            bench = true;
+            if (a + 1 < argc) benchTicks = atoi(argv[a + 1]);
+            if (a + 3 < argc) { benchW = atoi(argv[a + 2]); benchH = atoi(argv[a + 3]); }
+        }
+    }
+
     glfwSetErrorCallback(error_callback);
     if (!glfwInit()) return 1;
 
@@ -42,16 +58,91 @@ int main() {
     if (!window) return 1;
     if (gl3wInit()) { fprintf(stderr, "gl3w init failed\n"); return 1; }
 
+    // Vsync off: we pace the frame ourselves to kMaxFps below. Without the cap an
+    // idle/paused window would spin the GPU at thousands of fps for nothing.
+    glfwSwapInterval(0);
+    constexpr double kMaxFps = 240.0;
+
     ImPlot::CreateContext();
 
-    const int gridW = roundTo3(1200);
-    const int gridH = roundTo3(800);
+    const int gridW = roundTo3(bench && benchW > 0 ? benchW : 800);
+    const int gridH = roundTo3(bench && benchH > 0 ? benchH : 600);
     Simulation sim(gridW, gridH);   // CPU side: seeding, save/load, editing only
     sim.generate();
 
     GpuSimulation gpu;
     const bool gpuOk = gpu.init(sim.world, sim.cfg);
     bool worldSynced = true;        // does sim.world mirror the live GPU state?
+
+    if (bench) {
+        if (!gpuOk) { fprintf(stderr, "bench: GPU init failed\n"); return 1; }
+        auto countAlive = [&]() {
+            gpu.download(sim.world);
+            int n = 0; for (uint8_t k : sim.world.kind) if (k == (uint8_t)Cell::Alive) ++n;
+            return n;
+        };
+        gpu.step(2); gpu.colorize(DisplayMode::Family, sim.cfg.maxAge); glFinish();  // warm up
+
+        printf("BENCH grid=%dx%d (%d cells)\n", gridW, gridH, gridW * gridH);
+
+        // (1) colorize ALONE (no stepping): isolates the per-frame render-compute
+        // cost so we can see whether drawing, not simulating, is what costs time.
+        {
+            const int reps = 120;
+            glFinish();
+            auto k0 = std::chrono::high_resolution_clock::now();
+            for (int r = 0; r < reps; ++r) gpu.colorize(DisplayMode::Family, sim.cfg.maxAge);
+            glFinish();
+            auto k1 = std::chrono::high_resolution_clock::now();
+            double kms = std::chrono::duration<double, std::milli>(k1 - k0).count() / reps;
+            printf("BENCH colorize-only: %.3f ms/call  (%.1f fps if this were the only cost)\n",
+                   kms, 1000.0 / kms);
+        }
+
+        // (2) sim ms/tick measured on the FIRST few ticks, at full population.
+        {
+            int a0 = countAlive();
+            glFinish();
+            auto s0 = std::chrono::high_resolution_clock::now();
+            gpu.step(32); glFinish();
+            auto s1 = std::chrono::high_resolution_clock::now();
+            double sms = std::chrono::duration<double, std::milli>(s1 - s0).count() / 32.0;
+            printf("BENCH sim @high-pop: %.3f ms/tick  (alive~%d)\n", sms, a0);
+        }
+
+        // (3) Realistic frame cost: step(spf) + colorize per frame, as the GUI loop
+        // runs it (still no ImGui draw / swap / vsync).
+        const int spf = 32, frames = 8;
+        int aliveFrameStart = countAlive();
+        auto c0 = std::chrono::high_resolution_clock::now();
+        for (int fr = 0; fr < frames; ++fr) {
+            gpu.step(spf);
+            gpu.colorize(DisplayMode::Family, sim.cfg.maxAge);
+        }
+        glFinish();
+        auto c1 = std::chrono::high_resolution_clock::now();
+        int aliveFrameEnd = countAlive();
+        double fms = std::chrono::duration<double, std::milli>(c1 - c0).count() / frames;
+        printf("BENCH frame:  steps/frame=%d  alive~%d->%d  %.2f ms/frame  %.1f fps  (sim+colorize, no GUI/vsync)\n",
+               spf, aliveFrameStart, aliveFrameEnd, fms, 1000.0 / fms);
+
+        // Pure per-tick simulation throughput (population keeps falling here).
+        int aliveBefore = countAlive();
+        auto t0 = std::chrono::high_resolution_clock::now();
+        gpu.step(benchTicks); glFinish();
+        auto t1 = std::chrono::high_resolution_clock::now();
+        int aliveAfter = countAlive();
+        double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+        double msPerTick = ms / benchTicks;
+        double avgAlive = 0.5 * (aliveBefore + aliveAfter);
+        printf("BENCH sim:    ms/tick=%.3f  ticks/s=%.1f  alive=%d->%d  cell-updates/s=%.2fM\n",
+               msPerTick, 1000.0 / msPerTick, aliveBefore, aliveAfter,
+               avgAlive * (1000.0 / msPerTick) / 1e6);
+        ImPlot::DestroyContext();
+        glfwDestroyWindow(window);
+        glfwTerminate();
+        return 0;
+    }
 
     float  zoom = 1.0f;
     ImVec2 pan(0.0f, 0.0f);
@@ -74,6 +165,8 @@ int main() {
 
     // Pull the live GPU world into sim.world so it can be edited/saved.
     auto syncDown = [&]() { if (!worldSynced) { gpu.download(sim.world); worldSynced = true; } };
+
+    double nextFrameEnd = glfwGetTime();   // frame-cap pacing accumulator
 
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
@@ -198,6 +291,16 @@ int main() {
                 ImGui::SliderFloat("Action cost", &sim.cfg.actionCost, 0.0f, 5.0f);
                 if (ImGui::IsItemHovered()) ImGui::SetTooltip("Energy paid for move / eat / give / divide / attack");
                 ImGui::SliderFloat("Divide cost", &sim.cfg.divideCost, 10.0f, 500.0f);
+                ImGui::SliderFloat("Give fraction", &sim.cfg.giveFraction, 0.0f, 0.5f, "%.2f");
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Share of energy handed to a needier kin in front");
+                ImGui::SliderFloat("Attack damage", &sim.cfg.attackDamage, 0.0f, 200.0f);
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("HP removed per attack; blunted by the target's kin wall");
+                ImGui::SliderFloat("Max HP", &sim.cfg.maxHp, 10.0f, 500.0f);
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Full health; a cell dies into a corpse at 0 HP (applied on Regenerate)");
+                ImGui::SliderFloat("HP regen", &sim.cfg.regenRate, 0.0f, 5.0f, "%.2f");
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("HP regrown per tick when wounded");
+                ImGui::SliderFloat("Regen cost", &sim.cfg.regenCost, 0.0f, 5.0f, "%.2f");
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Energy spent per HP regrown");
                 ImGui::SliderInt("Max age", &sim.cfg.maxAge, 100, 20000);
                 ImGui::EndTabItem();
             }
@@ -226,6 +329,8 @@ int main() {
                 ImGui::RadioButton("Energy", &m0, (int)DisplayMode::Energy);
                 ImGui::RadioButton("Age", &m0, (int)DisplayMode::Age);
                 ImGui::RadioButton("Environment", &m0, (int)DisplayMode::Environment);
+                ImGui::RadioButton("Signal / pheromone", &m0, (int)DisplayMode::Signal);
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Pheromone each cell emits (the channel colonies coordinate over)");
                 mode = (DisplayMode)m0;
                 ImGui::Separator();
                 int t0 = (int)tool;
@@ -277,6 +382,18 @@ int main() {
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         glfwSwapBuffers(window);
+
+        // Frame cap (vsync is off): pace to at most kMaxFps. The wait is never more
+        // than one frame (~4 ms at 240), so a short spin is accurate and cheap; when
+        // the sim already runs slower than the cap this never engages. The
+        // accumulator keeps long-run pacing exact without catch-up bursts.
+        nextFrameEnd += 1.0 / kMaxFps;
+        double tNow = glfwGetTime();
+        if (tNow < nextFrameEnd) {
+            while (glfwGetTime() < nextFrameEnd) std::this_thread::yield();
+        } else {
+            nextFrameEnd = tNow;   // running behind the cap; drop the accrued debt
+        }
     }
 
     ImGui_ImplOpenGL3_Shutdown();

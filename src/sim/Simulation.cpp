@@ -47,11 +47,11 @@ void Simulation::seedWeights(int i, bool instinct) {
     if (!instinct) return;
 
     // Reflex wiring. Hidden neuron 0 becomes an "energy high?" detector driven
-    // solely by the energy sense (input 1). Its sign then routes the output:
+    // solely by the energy sense (input 0). Its sign then routes the output:
     //   low energy  -> ActPhoto wins,  high energy -> ActDivide wins.
     // (Weight value = byte * kWeightScale; 1/32 here, so 127 ~ +4.0.)
     for (int in = 0; in < kNNInputs; ++in) setW(w, idxW1(in, 0), 0);
-    setW(w, idxW1(1, 0), 127);   // energyNorm -> h0 (strong)
+    setW(w, idxW1(0, 0), 127);   // energyNorm -> h0 (strong)
     setW(w, idxB1(0), -40);      // threshold ~ energyNorm 0.3
 
     for (int out = 0; out < kNNOutputs; ++out) {
@@ -62,6 +62,17 @@ void Simulation::seedWeights(int i, bool instinct) {
     setW(w, idxW2(0, ActPhoto), -127);     // ...until energy is high
     setW(w, idxB2(ActDivide), -96);
     setW(w, idxW2(0, ActDivide), 127);     // high energy -> divide
+
+    // Reflex 2 (bootstraps scavenging). Hidden neuron 1 is a "corpse ahead?"
+    // detector driven by the facedOrg sense (input 11). When a corpse is in front
+    // it boosts ActEat and suppresses ActPhoto, so a seeded cell actually feeds on
+    // the dead instead of ignoring them; evolution tunes it from there.
+    for (int in = 0; in < kNNInputs; ++in) setW(w, idxW1(in, 1), 0);
+    setW(w, idxW1(11, 1), 127);            // facedOrg -> h1 (strong)
+    setW(w, idxB1(1), -64);                // h1 ~ +1 only when a corpse is faced
+    setW(w, idxW2(1, ActEat),  127);       // corpse ahead -> eat
+    setW(w, idxB2(ActEat),     32);
+    setW(w, idxW2(1, ActPhoto), -127);     // ...rather than photosynthesize
 }
 
 // --- world generation ------------------------------------------------------
@@ -73,6 +84,9 @@ void Simulation::spawnBot(int i) {
     world.mineral[i]   = cfg.startEnergy * 0.5f;
     world.marker[i]    = (uint32_t)randInt(256) | ((uint32_t)randInt(256) << 8) | ((uint32_t)randInt(256) << 16);
     world.hibernating[i] = 0;
+    world.signal[i] = 0.0f;
+    world.hp[i] = cfg.maxHp;
+    for (int k = 0; k < kNNRecur; ++k) world.mem[(size_t)i * kNNRecur + k] = 0.0f;
     seedWeights(i, randFloat() < cfg.instinctFraction);
 }
 

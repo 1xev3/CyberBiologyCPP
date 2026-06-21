@@ -27,10 +27,14 @@ layout(std430, binding=4) buffer B4 { float mineral[]; };
 layout(std430, binding=5) buffer B5 { uint  genome[]; };
 layout(std430, binding=6) buffer B6 { uint  marker[]; };  // packed RGB "scent" tag
 layout(std430, binding=7) buffer B7 { uint  hib[]; };     // 1 = hibernating (asleep)
+layout(std430, binding=8) buffer B8 { float sig[]; };     // emitted pheromone field
+layout(std430, binding=9) buffer B9 { float mem[]; };     // recurrent state, NR per cell
+layout(std430, binding=10) buffer B10 { float hp[]; };    // health (combat damages this)
 
 uniform int  uW, uH, uPhase, uActW, uActH;
 uniform uint uTick, uSeed;
 uniform float uPhoto, uMineralRate, uMetab, uHibMetab, uActionCost, uDivide,
+              uGive, uAttack, uMaxHp, uRegen, uRegenCost,
               uMaxEnergy, uMaxMineral, uStartEnergy, uMutChance,
               uTime, uEnvScale, uEnvDrift, uDayNight;
 uniform int  uKinDist, uMaxAge, uMutCount, uMutDelta, uMarkerDrift;
@@ -81,11 +85,11 @@ float fbm(vec2 p){ float s=0.0,a=0.5; for(int o=0;o<4;o++){ s+=a*vnoise(p); p*=2
 float dayMul(){ return (uDayNight>0.0001) ? (0.7+0.3*sin(uTime*uDayNight)) : 1.0; }
 float lightAt(int x,int y){ vec2 uv=vec2(float(x),float(y))/float(uH);
     float pv=fbm(uv*uEnvScale + vec2(uTime*uEnvDrift,0.0));
-    float vgrad=1.0 - float(y)/float(uH)*0.5;
+    float vgrad=1.0 - float(y)/float(uH)*0.85;   // steep: top lit, bottom dark
     return clamp(pv*vgrad*dayMul(),0.0,1.0); }
 float mineralAt(int x,int y){ vec2 uv=vec2(float(x),float(y))/float(uH);
     float pv=fbm(uv*uEnvScale + vec2(13.7,7.3) - vec2(0.0,uTime*uEnvDrift));
-    float vgrad=0.5 + float(y)/float(uH)*0.5;
+    float vgrad=0.15 + float(y)/float(uH)*0.85;  // mirror: minerals rich at bottom
     return clamp(pv*vgrad,0.0,1.0); }
 
 // --- actions (act in the facing direction) ---------------------------------
@@ -93,6 +97,8 @@ void moveCell(int i,int j){
     kind[j]=kind[i]; dir[j]=dir[i]; age[j]=age[i]; energy[j]=energy[i]; mineral[j]=mineral[i];
     for(int k=0;k<GW;k++) genome[j*GW+k]=genome[i*GW+k];
     marker[j]=marker[i]; hib[j]=hib[i];
+    sig[j]=sig[i]; for(int k=0;k<NR;k++) mem[j*NR+k]=mem[i*NR+k];
+    hp[j]=hp[i];
     kind[i]=0u;
 }
 void doMove(int i,int x,int y){ uint f=dir[i]; int xt=frontX(x,f),yt=frontY(y,f);
@@ -103,16 +109,25 @@ void rotate(int i,float turn){ int d=int(dir[i]); d += (turn>0.0)?1:7; dir[i]=ui
 void photo(int i,int x,int y){ energy[i]+= uPhoto*lightAt(x,y); }
 void mineralG(int i,int x,int y){ energy[i]+= uMineralRate*mineralAt(x,y); }
 
+// Scavenging only: Eat consumes a *corpse* (organic) in front. It no longer kills
+// living cells - that role belongs to Attack. This stops kin-clusters from eating
+// their own (cannibalism quietly broke cooperation) and creates a real food chain:
+// photosynthesiser -> Attack kills it -> corpse -> Eat scavenges it.
 void doEat(int i,int x,int y){ uint f=dir[i]; int xt=frontX(x,f),yt=frontY(y,f);
     if(yt<0||yt>=uH) return; int j=idx(xt,yt);
-    if(kind[j]==0u) return;
-    if(kind[j]==2u){ energy[i]+=energy[j]; kind[j]=0u; return; }
+    if(kind[j]!=2u) return;                      // only organic corpses
     energy[i]+=energy[j]; mineral[i]+=mineral[j]; kind[j]=0u; }
 
+// Targeted altruism: feed only a *kin* cell in front, and only one that is
+// needier than us. Cheap (uGive ~10%) so a clone-cluster can shuttle energy from
+// the lit cells to the shaded ones without the giver being out-competed - the
+// condition that lets cooperation survive selection (Hamilton: r*b > c).
 void doGive(int i,int x,int y){ uint f=dir[i]; int xt=frontX(x,f),yt=frontY(y,f);
     if(yt<0||yt>=uH) return; int j=idx(xt,yt);
     if(kind[j]!=1u) return;
-    float h=energy[i]*0.25; energy[i]-=h; energy[j]+=h; if(energy[j]>uMaxEnergy) energy[j]=uMaxEnergy; }
+    if(!isRel(i,j)) return;              // only feed kin
+    if(energy[j]>=energy[i]) return;     // only feed the needier
+    float h=energy[i]*uGive; energy[i]-=h; energy[j]+=h; if(energy[j]>uMaxEnergy) energy[j]=uMaxEnergy; }
 
 int findEmpty(int x,int y,uint f){ for(int n=0;n<8;n++){ int yt=nbY(y,f,n); if(yt<0||yt>=uH) continue;
     int xt=nbX(x,f,n); if(kind[idx(xt,yt)]==0u) return n; } return 8; }
@@ -134,12 +149,27 @@ void doDouble(int i,int x,int y){ if(energy[i]<uDivide) return;
     int xt=nbX(x,dir[i],n),yt=nbY(y,dir[i],n); int j=idx(xt,yt);
     kind[j]=1u; dir[j]=dir[i]; age[j]=0; marker[j]=marker[i]; hib[j]=0u;
     for(int k=0;k<GW;k++) genome[j*GW+k]=genome[i*GW+k];
+    sig[j]=0.0; for(int k=0;k<NR;k++) mem[j*NR+k]=0.0;   // child starts with a blank mind-state
+    hp[j]=uMaxHp;                                         // ...and full health
     energy[i]*=0.5; energy[j]=energy[i]; mineral[i]*=0.5; mineral[j]=mineral[i];
     if(rfloat()<uMutChance) mutateChild(j); }
 
+// Predation with group defense. Damages the HP of any living cell in front -
+// including kin: the net is *not* stopped from attacking its own, it must learn
+// (via kin selection) that killing your relatives is a losing strategy. The blow
+// is blunted by the victim's own kin wall: every kin neighbour the target has
+// shields it (~12% each), so a lone cell is easy prey while a packed colony is
+// nearly immune. A kill leaves a corpse holding the victim's full energy +
+// minerals (HP, not energy, is what the strike spends) - so energy is preserved
+// in the corpse and a scavenger recovers it with Eat.
 void doAttack(int i,int x,int y){ uint f=dir[i]; int xt=frontX(x,f),yt=frontY(y,f);
     if(yt<0||yt>=uH) return; int j=idx(xt,yt); if(kind[j]!=1u) return;
-    int k=rint(GN); setByte(j,k,gbyte(i,k)); }   // injects a behavior gene, not the scent
+    int support=0;
+    for(int n=0;n<8;n++){ int yy=nbY(yt,0u,n); if(yy<0||yy>=uH) continue; int xx=nbX(xt,0u,n);
+        if(kind[idx(xx,yy)]==1u && isRel(j,idx(xx,yy))) support++; }
+    float dmg=uAttack*(1.0 - 0.12*float(support)); if(dmg<0.0) dmg=0.0;
+    hp[j]-=dmg;
+    if(hp[j]<=0.0) kind[j]=2u; }                  // killed -> corpse keeps full energy + minerals
 
 void main(){
     uint t = gl_GlobalInvocationID.x;
@@ -159,44 +189,50 @@ void main(){
     uint f = dir[i];
     int fx=frontX(cx,f), fy=frontY(cy,f);
     bool frontOn = (fy>=0 && fy<uH);
-    int facedEmpty=0,facedKin=0,facedNon=0,facedOrg=0; float fe=0.0;
-    float fmr=0.0,fmg=0.0,fmb=0.0;          // marker of the faced cell (0 if none)
+    int facedEmpty=0,facedKin=0,facedNon=0,facedOrg=0; float fe=0.0,fsig=0.0;
     if(frontOn){ int j=idx(fx,fy); uint kj=kind[j];
         if(kj==0u) facedEmpty=1; else if(kj==2u) facedOrg=1;
-        else { fe=energy[j]/uMaxEnergy; if(isRel(i,j)) facedKin=1; else facedNon=1;
-               uint mj=marker[j]; fmr=float(mj&0xFFu)/255.0; fmg=float((mj>>8)&0xFFu)/255.0; fmb=float((mj>>16)&0xFFu)/255.0; } }
+        else { fe=energy[j]/uMaxEnergy; fsig=sig[j]; if(isRel(i,j)) facedKin=1; else facedNon=1; } }
     else facedEmpty=1;
-    // resources in the faced cell: comparing these to the cell's own light/mineral
-    // gives a directional gradient, so the net can follow the drifting fields.
+    // resources in the faced cell vs here give a directional gradient; sampling the
+    // left/right neighbours too lets the net climb the drifting fields without first
+    // having to spin in place to scan.
     float frontLight = frontOn ? lightAt(fx,fy)   : 0.0;
     float frontMin   = frontOn ? mineralAt(fx,fy) : 0.0;
-    uint mi=marker[i];                       // own marker
-    float omr=float(mi&0xFFu)/255.0, omg=float((mi>>8)&0xFFu)/255.0, omb=float((mi>>16)&0xFFu)/255.0;
-    int kin=0,nonkin=0,org=0;
+    int lx=nbX(cx,f,6), ly=nbY(cy,f,6);     // n=6: 90 deg left of facing
+    int rx=nbX(cx,f,2), ry=nbY(cy,f,2);     // n=2: 90 deg right of facing
+    float leftLight  = (ly>=0&&ly<uH) ? lightAt(lx,ly) : 0.0;
+    float rightLight = (ry>=0&&ry<uH) ? lightAt(rx,ry) : 0.0;
+    // neighbourhood census + average pheromone of surrounding kin (the channel a
+    // colony coordinates over: "hungry here", "danger here", ...).
+    int kin=0,nonkin=0,org=0; float kinSig=0.0;
     for(int n=0;n<8;n++){ int yt=nbY(cy,f,n); if(yt<0||yt>=uH) continue; int xt=nbX(cx,f,n);
-        uint kj=kind[idx(xt,yt)];
-        if(kj==2u) org++; else if(kj==1u){ if(isRel(i,idx(xt,yt))) kin++; else nonkin++; } }
+        int j=idx(xt,yt); uint kj=kind[j];
+        if(kj==2u) org++; else if(kj==1u){ if(isRel(i,j)){ kin++; kinSig+=sig[j]; } else nonkin++; } }
+    float kinSigAvg = (kin>0) ? kinSig/float(kin) : 0.0;
 
     float x[NI];
-    x[0]=1.0;
-    x[1]=energy[i]/uMaxEnergy;
-    x[2]=mineral[i]/uMaxMineral;
-    x[3]=float(age[i])/float(uMaxAge);
-    x[4]=lightAt(cx,cy);
-    x[5]=mineralAt(cx,cy);
-    x[6]=float(facedEmpty);
-    x[7]=float(facedKin);
-    x[8]=float(facedNon);
-    x[9]=float(facedOrg);
-    x[10]=fe;
-    x[11]=float(kin)/8.0;
-    x[12]=float(nonkin)/8.0;
-    x[13]=float(org)/8.0;
-    x[14]=rfloat()*2.0-1.0;
-    x[15]=frontLight;        // env ahead (vs x[4]/x[5] here -> drift direction)
-    x[16]=frontMin;
-    x[17]=omr;  x[18]=omg;  x[19]=omb;   // own scent
-    x[20]=fmr;  x[21]=fmg;  x[22]=fmb;   // scent of the cell in front
+    x[0]=energy[i]/uMaxEnergy;
+    x[1]=mineral[i]/uMaxMineral;
+    x[2]=lightAt(cx,cy);
+    x[3]=mineralAt(cx,cy);
+    x[4]=frontLight;         // env ahead (vs x[2]/x[3] here -> drift direction)
+    x[5]=frontMin;
+    x[6]=leftLight;
+    x[7]=rightLight;
+    x[8]=float(facedEmpty);
+    x[9]=float(facedKin);
+    x[10]=float(facedNon);
+    x[11]=float(facedOrg);
+    x[12]=fe;                // energy of the cell in front (eat/give/attack target)
+    x[13]=float(kin)/8.0;
+    x[14]=float(nonkin)/8.0;
+    x[15]=float(org)/8.0;
+    x[16]=fsig;              // pheromone of the cell in front
+    x[17]=kinSigAvg;         // mean pheromone of surrounding kin
+    x[18]=rfloat()*2.0-1.0;  // noise (stochastic policy / symmetry breaking)
+    for(int r=0;r<NR;r++) x[19+r]=mem[i*NR+r];   // recurrent memory from last tick
+    x[23]=hp[i]/uMaxHp;      // own health (so the net can flee / play safe when wounded)
 
     // --- forward: h = tanh(W1.x + b1); o = W2.h + b2 ---
     float o[NO];
@@ -209,7 +245,13 @@ void main(){
     }
 
     int act=0; float best=o[0];
-    for(int a=1;a<10;a++){ if(o[a]>best){ best=o[a]; act=a; } }
+    for(int a=1;a<NA;a++){ if(o[a]>best){ best=o[a]; act=a; } }
+
+    // Commit recurrent state and the emitted pheromone every tick (squashed to
+    // bounded ranges so they can't blow up). Done before any action so a cell that
+    // moves/divides this tick carries its freshly-updated mind-state along.
+    for(int r=0;r<NR;r++) mem[i*NR+r]=tanh(o[ORECUR+r]);
+    sig[i]=0.5+0.5*tanh(o[OSIG]);
 
     // Hibernation (anabiosis). An asleep cell runs the net only to decide whether
     // to keep sleeping: while hibernating the single available choice is to wake.
@@ -231,7 +273,7 @@ void main(){
     if(act==1||act==5||act==6||act==7||act==8) energy[i]-=uActionCost;
 
     if(act==1) doMove(i,cx,cy);
-    else if(act==2) rotate(i,o[10]);
+    else if(act==2) rotate(i,o[OTURN]);
     else if(act==3) photo(i,cx,cy);
     else if(act==4) mineralG(i,cx,cy);
     else if(act==5) doEat(i,cx,cy);
@@ -241,6 +283,13 @@ void main(){
 
     if(kind[i]!=1u) return;             // may have moved away
     if(energy[i]>uMaxEnergy) energy[i]=uMaxEnergy;
+    // slow self-repair: spend energy to regrow lost HP (wounds heal if you survive
+    // and stay fed), so hit-and-run and attrition both become real strategies.
+    if(hp[i]<uMaxHp && energy[i]>0.0){
+        float heal=min(uRegen, uMaxHp-hp[i]); float cost=heal*uRegenCost;
+        if(cost>energy[i]){ heal=energy[i]/uRegenCost; cost=energy[i]; }
+        hp[i]+=heal; energy[i]-=cost;
+    }
     energy[i]-=uMetab; age[i]+=1;
     if(energy[i]<=0.0){ kind[i]=0u; return; }
     if(age[i]>uMaxAge) kind[i]=2u;      // die of old age -> organic
@@ -257,7 +306,8 @@ layout(std430, binding=2) buffer B2 { int   age[]; };
 layout(std430, binding=3) buffer B3 { float energy[]; };
 layout(std430, binding=6) buffer B6 { uint  marker[]; };  // packed RGB "scent" tag
 layout(std430, binding=7) buffer B7 { uint  hib[]; };     // 1 = hibernating
-layout(std430, binding=9) buffer BC { uint  aliveCount[]; };
+layout(std430, binding=8) buffer B8 { float sig[]; };     // emitted pheromone field
+layout(std430, binding=11) buffer BC { uint  aliveCount[]; };
 
 uniform int uW, uH, uMode, uMaxAge;
 uniform float uTime, uEnvScale, uEnvDrift, uDayNight;
@@ -271,10 +321,10 @@ float fbm(vec2 p){ float s=0.0,a=0.5; for(int o=0;o<4;o++){ s+=a*vnoise(p); p*=2
 float dayMul(){ return (uDayNight>0.0001) ? (0.7+0.3*sin(uTime*uDayNight)) : 1.0; }
 float lightAt(int x,int y){ vec2 uv=vec2(float(x),float(y))/float(uH);
     float pv=fbm(uv*uEnvScale + vec2(uTime*uEnvDrift,0.0));
-    return clamp(pv*(1.0-float(y)/float(uH)*0.5)*dayMul(),0.0,1.0); }
+    return clamp(pv*(1.0-float(y)/float(uH)*0.85)*dayMul(),0.0,1.0); }
 float mineralAt(int x,int y){ vec2 uv=vec2(float(x),float(y))/float(uH);
     float pv=fbm(uv*uEnvScale + vec2(13.7,7.3) - vec2(0.0,uTime*uEnvDrift));
-    return clamp(pv*(0.5+float(y)/float(uH)*0.5),0.0,1.0); }
+    return clamp(pv*(0.15+float(y)/float(uH)*0.85),0.0,1.0); }
 
 // Clan color = the cell's scent marker, the same tag isRel() recognizes, so what
 // you see on screen is exactly what the cells treat as kin. Lifted toward pastel
@@ -307,6 +357,10 @@ void main(){
             if(uMode==0)      c = markerColor(i);    // Family / clan (scent marker)
             else if(uMode==1){ float e=energy[i]; c=vec3(min(e/1000.0,1.0), min(e/2000.0,1.0)*0.647, 0.0); }
             else if(uMode==2){ float a=clamp(float(age[i])/float(max(uMaxAge,1)),0.0,1.0); c=vec3(a,0.0,a); }
+            else if(uMode==4){                        // Signal: pheromone heatmap
+                float s=clamp(sig[i],0.0,1.0);
+                c = mix(vec3(0.02,0.06,0.16), vec3(0.2,1.0,0.85), s) + vec3(s*s*0.6,0.0,0.0);
+            }
         }
     }
     if(k==1u && hib[i]==1u) c = mix(c, vec3(0.10,0.16,0.34), 0.6);  // asleep: cold/dim
@@ -318,13 +372,17 @@ void main(){
 namespace {
 // #version + topology #defines shared by both compute shaders.
 std::string shaderHeader() {
-    char hdr[512];
+    char hdr[1024];
     std::snprintf(hdr, sizeof(hdr),
         "#version 430\n"
         "#define NI %d\n#define NH %d\n#define NO %d\n"
+        "#define NA %d\n#define NR %d\n"
+        "#define OTURN %d\n#define ORECUR %d\n#define OSIG %d\n"
         "#define GN %d\n#define GW %d\n#define WSCALE %ff\n"
         "#define B1OFF %d\n#define W2OFF %d\n#define B2OFF %d\n",
         kNNInputs, kNNHidden, kNNOutputs,
+        kActCount, kNNRecur,
+        kOutTurn, kOutRecur, kOutSignal,
         kGenomeSize, kGenomeWords, kWeightScale,
         kNNInputs*kNNHidden,
         kNNInputs*kNNHidden + kNNHidden,
@@ -371,6 +429,8 @@ void GpuSimulation::cacheUniformLocations() {
     sl_ = SimLoc{
         S("uW"), S("uH"), S("uPhase"), S("uActW"), S("uActH"), S("uTick"), S("uSeed"), S("uTime"),
         S("uPhoto"), S("uMineralRate"), S("uMetab"), S("uHibMetab"), S("uActionCost"), S("uDivide"),
+        S("uGive"), S("uAttack"),
+        S("uMaxHp"), S("uRegen"), S("uRegenCost"),
         S("uMaxEnergy"), S("uMaxMineral"), S("uStartEnergy"), S("uMutChance"),
         S("uEnvScale"), S("uEnvDrift"), S("uDayNight"),
         S("uKinDist"), S("uMaxAge"), S("uMutCount"), S("uMutDelta"), S("uMarkerDrift"),
@@ -438,6 +498,9 @@ void GpuSimulation::upload(const WorldState& w) {
     fill(5, packed.data(), packed.size() * sizeof(uint32_t));
     fill(6, w.marker.data(), n * sizeof(uint32_t));
     fill(7, w.hibernating.data(), n * sizeof(uint32_t));
+    fill(8, w.signal.data(), n * sizeof(float));
+    fill(9, w.mem.data(), (size_t)n * kNNRecur * sizeof(float));
+    fill(10, w.hp.data(), n * sizeof(float));
 }
 
 void GpuSimulation::bindBuffers() const {
@@ -451,6 +514,9 @@ void GpuSimulation::setSimUniforms() {
     glUniform1f(sl_.metab, cfg_.metabolism); glUniform1f(sl_.hibMetab, cfg_.hibernationMetab);
     glUniform1f(sl_.actionCost, cfg_.actionCost);
     glUniform1f(sl_.divide, cfg_.divideCost);
+    glUniform1f(sl_.give, cfg_.giveFraction); glUniform1f(sl_.attack, cfg_.attackDamage);
+    glUniform1f(sl_.maxHp, cfg_.maxHp); glUniform1f(sl_.regen, cfg_.regenRate);
+    glUniform1f(sl_.regenCost, cfg_.regenCost);
     glUniform1f(sl_.maxEnergy, cfg_.maxEnergy); glUniform1f(sl_.maxMineral, cfg_.maxMineral);
     glUniform1f(sl_.startEnergy, cfg_.startEnergy); glUniform1f(sl_.mutChance, cfg_.mutationChance);
     glUniform1f(sl_.envScale, cfg_.envScale); glUniform1f(sl_.envDrift, cfg_.envDrift);
@@ -507,7 +573,7 @@ int GpuSimulation::colorize(DisplayMode mode, int maxAge) {
 
     glUseProgram(colorProg_);
     bindBuffers();
-    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 9, counter_[cur]);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 11, counter_[cur]);
     glBindImageTexture(0, tex_, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8);
     glUniform1i(cl_.W, width_);
     glUniform1i(cl_.H, height_);
@@ -557,6 +623,12 @@ void GpuSimulation::download(WorldState& w) const {
     glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, n * sizeof(uint32_t), w.marker.data());
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, buf_[7]);
     glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, n * sizeof(uint32_t), w.hibernating.data());
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, buf_[8]);
+    glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, n * sizeof(float), w.signal.data());
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, buf_[9]);
+    glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, (size_t)n * kNNRecur * sizeof(float), w.mem.data());
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, buf_[10]);
+    glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, n * sizeof(float), w.hp.data());
 }
 
 } // namespace cb

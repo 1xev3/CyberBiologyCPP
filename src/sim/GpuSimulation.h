@@ -7,7 +7,7 @@ namespace cb {
 
 // How the world texture is colorized. Family shows the scent-marker clan color
 // so territories/clans are visible; Environment shows the animated resource field.
-enum class DisplayMode { Family, Energy, Age, Environment };
+enum class DisplayMode { Family, Energy, Age, Environment, Signal };
 
 // GPU backend: the whole world lives in OpenGL shader-storage buffers and one
 // simulation tick is nine compute dispatches (one per 3x3 sublattice phase).
@@ -34,7 +34,7 @@ public:
     uint64_t ticks() const { return tick_; }
 
 private:
-    void bindBuffers() const;             // bind the 7 state SSBOs (slots 0..6)
+    void bindBuffers() const;             // bind the state SSBOs (slots 0..kNumBuffers-1)
     void setSimUniforms();
     void cacheUniformLocations();         // query+store all uniform locations once
 
@@ -53,13 +53,15 @@ private:
     int          curCounter_ = 0;
     bool         counterPrimed_ = false;
     int          lastAlive_ = 0;
-    enum { kNumBuffers = 8 };
-    unsigned int buf_[kNumBuffers] = {0}; // kind,dir,age,energy,mineral,genome,marker,hib
+    enum { kNumBuffers = 11 };
+    unsigned int buf_[kNumBuffers] = {0}; // kind,dir,age,energy,mineral,genome,marker,hib,signal,mem,hp
 
     // Cached uniform locations (GLint stored as int to keep GL out of the header).
     struct SimLoc {
         int W, H, phase, actW, actH, tick, seed, time;
         int photo, mineralRate, metab, hibMetab, actionCost, divide;
+        int give, attack;
+        int maxHp, regen, regenCost;
         int maxEnergy, maxMineral, startEnergy, mutChance;
         int envScale, envDrift, dayNight;
         int kinDist, maxAge, mutCount, mutDelta, markerDrift;

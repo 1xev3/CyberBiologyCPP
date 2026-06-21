@@ -5,38 +5,58 @@ namespace cb {
 
 // --- Neural-network "brain" topology ---------------------------------------
 // A living cell's genome is the weight vector of a small fixed fully-connected
-// network: senses -> hidden (tanh) -> action logits. Evolution acts on these
-// weights. Sizes are compile-time so the genome is a fixed length that maps
-// cleanly onto GPU buffers and the GLSL forward pass.
-constexpr int kNNInputs  = 23;
+// network: senses -> hidden (tanh) -> outputs. Evolution acts on these weights.
+// Sizes are compile-time so the genome is a fixed length that maps cleanly onto
+// GPU buffers and the GLSL forward pass.
+//
+// The net is *recurrent*: kNNRecur of its outputs are tanh-squashed and fed back
+// as inputs on the next tick (per-cell `mem`). This gives cells internal state -
+// timers, latched roles, oscillators - so behaviour is no longer pure reflex.
+// One more output is a pheromone the cell emits into a shared `signal` field that
+// neighbours read, enabling coordination/communication between cells.
+constexpr int kNNRecur   = 4;    // recurrent memory units (output -> next input)
+
+constexpr int kNNInputs  = 24;
 constexpr int kNNHidden  = 12;
-constexpr int kNNOutputs = 11;   // 10 action logits + 1 turn signal
+
+// Action ids (must match the GLSL dispatch and the instinct seeding). The first
+// kActCount outputs are the action logits the argmax chooses among.
+enum Action {
+    ActIdle = 0, ActMove, ActRotate, ActPhoto, ActMineral,
+    ActEat, ActGive, ActDivide, ActAttack, ActHibernate
+};
+constexpr int kActCount   = 10;                 // ActIdle..ActHibernate
+
+// Output layout: [ kActCount action logits ][ turn ][ kNNRecur memory ][ signal ]
+constexpr int kOutTurn    = kActCount;          // 10  rotate direction signal
+constexpr int kOutRecur   = kOutTurn + 1;       // 11  first recurrent-memory output
+constexpr int kOutSignal  = kOutRecur + kNNRecur; // 15  pheromone emit
+constexpr int kNNOutputs  = kOutSignal + 1;     // 16
 
 // Genome length, in bytes (one quantized signed weight per byte):
 //   W1(in*hid) + b1(hid) + W2(hid*out) + b2(out)
 constexpr int kGenomeSize =
     kNNInputs * kNNHidden + kNNHidden +
-    kNNHidden * kNNOutputs + kNNOutputs;          // 23*12+12+12*11+11 = 431
+    kNNHidden * kNNOutputs + kNNOutputs;          // 23*12+12+12*16+16 = 496
 
 // Quantization: stored signed byte b in [-128,127] -> weight b * kWeightScale.
 constexpr float kWeightScale = 1.0f / 32.0f;
-
-
-// Action ids (must match the GLSL dispatch and the instinct seeding).
-enum Action {
-    ActIdle = 0, ActMove, ActRotate, ActPhoto, ActMineral,
-    ActEat, ActGive, ActDivide, ActAttack, ActHibernate
-};
 
 // All tunable simulation parameters in one place.
 struct Config {
     float startEnergy       = 120.0f;
     float photoEnergy       = 4.5f;    // max photosynthesis gain (x light field)
-    float mineralRate       = 3.0f;    // max mineral->energy gain (x mineral field)
+    float mineralRate       = 3.1f;    // max mineral->energy gain (x mineral field)
     float metabolism        = 1.0f;    // energy cost of being alive, per tick
     float hibernationMetab  = 0.05f;   // energy/tick while hibernating (aging is frozen)
     float actionCost        = 0.5f;    // cost of any active action (move/eat/give/divide/attack)
     float divideCost        = 120.0f;  // extra energy required/spent to reproduce
+    float giveFraction      = 0.10f;   // fraction of energy handed to a needier kin in front
+    float attackDamage      = 120.0f;  // HP removed per attack: one-shots a lone full-HP cell
+                                       // (> maxHp), but the target's kin wall can blunt it enough to survive
+    float maxHp             = 100.0f;  // full health; cells die (-> corpse) at hp <= 0
+    float regenRate         = 0.5f;    // HP regrown per tick when wounded
+    float regenCost         = 1.0f;    // energy spent per HP regrown
     int   kinMarkerDist     = 40;      // kin if scent-marker RGB L1 distance <= this
     int   maxAge            = 6000;
     float maxEnergy         = 1000.0f;
@@ -50,7 +70,7 @@ struct Config {
 
     // Environment (animated fBm fields sampled in-shader)
     float envScale          = 2.0f;    // spatial frequency of resource patches
-    float envDrift          = 0.0002f; // how fast patches move (per sim tick)
+    float envDrift          = 0.00005f; // how fast patches move (per sim tick)
     float dayNightSpeed     = 0.0003f; // global light cycle speed (0 = off)
 
     // World generation

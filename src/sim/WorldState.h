@@ -30,6 +30,9 @@ public:
     std::vector<uint8_t> genome;      // width*height*kGenomeSize quantized weights
     std::vector<uint32_t> marker;     // packed RGB "scent" tag (clan identity)
     std::vector<uint32_t> hibernating;// 1 = in anabiosis (asleep), 0 = awake
+    std::vector<float>   signal;      // emitted pheromone (read by neighbours)
+    std::vector<float>   mem;         // width*height*kNNRecur recurrent-state floats
+    std::vector<float>   hp;          // health; combat damages this, not energy
 
     WorldState() = default;
     WorldState(int w, int h) { resize(w, h); }

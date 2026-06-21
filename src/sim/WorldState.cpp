@@ -16,6 +16,9 @@ void WorldState::resize(int w, int h) {
     genome.assign(n * kGenomeSize, 0);   // byte 0 == signed weight 0
     marker.assign(n, 0);
     hibernating.assign(n, 0);
+    signal.assign(n, 0.0f);
+    mem.assign(n * kNNRecur, 0.0f);
+    hp.assign(n, 0.0f);                   // living cells get full HP on spawn/divide
 }
 
 void WorldState::clear() {
@@ -24,6 +27,9 @@ void WorldState::clear() {
 
 void WorldState::makeEmpty(int i) {
     kind[i] = (uint8_t)Cell::Empty;
+    signal[i] = 0.0f;
+    hp[i] = 0.0f;
+    for (int k = 0; k < kNNRecur; ++k) mem[(size_t)i * kNNRecur + k] = 0.0f;
 }
 
 void WorldState::moveCell(int from, int to) {
@@ -34,10 +40,14 @@ void WorldState::moveCell(int from, int to) {
     mineral[to]   = mineral[from];
     marker[to]    = marker[from];
     hibernating[to] = hibernating[from];
+    signal[to]    = signal[from];
+    hp[to]        = hp[from];
 
     uint8_t*       dst = mindAt(to);
     const uint8_t* src = mindAt(from);
     for (int k = 0; k < kGenomeSize; ++k) dst[k] = src[k];
+    for (int k = 0; k < kNNRecur; ++k)
+        mem[(size_t)to * kNNRecur + k] = mem[(size_t)from * kNNRecur + k];
 
     kind[from] = (uint8_t)Cell::Empty;
 }
