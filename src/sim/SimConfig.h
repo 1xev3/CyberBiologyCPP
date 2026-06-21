@@ -72,6 +72,7 @@ struct Config {
     float envScale          = 2.0f;    // spatial frequency of resource patches
     float envDrift          = 0.00005f; // how fast patches move (per sim tick)
     float dayNightSpeed     = 0.0003f; // global light cycle speed (0 = off)
+    float dayFraction       = 0.7f;    // share of each cycle that is daylight (0.5 = equal; >0.5 = longer days)
 
     // World generation
     float spawnChance       = 0.15f;

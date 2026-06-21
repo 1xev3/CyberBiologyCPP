@@ -286,41 +286,25 @@ int main(int argc, char** argv) {
                 ImGui::SliderFloat("Mineral rate", &sim.cfg.mineralRate, 0.0f, 20.0f);
                 ImGui::SliderFloat("Metabolism", &sim.cfg.metabolism, 0.0f, 5.0f);
                 if (ImGui::IsItemHovered()) ImGui::SetTooltip("Energy paid every tick just to stay alive");
-                ImGui::SliderFloat("Hibernation metabolism", &sim.cfg.hibernationMetab, 0.0f, 1.0f, "%.3f");
-                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Energy/tick while asleep; aging is frozen during hibernation");
-                ImGui::SliderFloat("Action cost", &sim.cfg.actionCost, 0.0f, 5.0f);
-                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Energy paid for move / eat / give / divide / attack");
                 ImGui::SliderFloat("Divide cost", &sim.cfg.divideCost, 10.0f, 500.0f);
-                ImGui::SliderFloat("Give fraction", &sim.cfg.giveFraction, 0.0f, 0.5f, "%.2f");
-                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Share of energy handed to a needier kin in front");
                 ImGui::SliderFloat("Attack damage", &sim.cfg.attackDamage, 0.0f, 200.0f);
                 if (ImGui::IsItemHovered()) ImGui::SetTooltip("HP removed per attack; blunted by the target's kin wall");
-                ImGui::SliderFloat("Max HP", &sim.cfg.maxHp, 10.0f, 500.0f);
-                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Full health; a cell dies into a corpse at 0 HP (applied on Regenerate)");
-                ImGui::SliderFloat("HP regen", &sim.cfg.regenRate, 0.0f, 5.0f, "%.2f");
-                if (ImGui::IsItemHovered()) ImGui::SetTooltip("HP regrown per tick when wounded");
-                ImGui::SliderFloat("Regen cost", &sim.cfg.regenCost, 0.0f, 5.0f, "%.2f");
-                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Energy spent per HP regrown");
                 ImGui::SliderInt("Max age", &sim.cfg.maxAge, 100, 20000);
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Evolution")) {
                 ImGui::SliderFloat("Mutation rate", &sim.cfg.mutationChance, 0.0f, 1.0f);
-                ImGui::SliderInt("Mutation size", &sim.cfg.mutationDelta, 1, 64);
-                ImGui::SliderInt("Kin distance", &sim.cfg.kinMarkerDist, 0, 200);
-                ImGui::SliderInt("Scent drift", &sim.cfg.markerDrift, 0, 32);
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Environment")) {
-                ImGui::SliderFloat("Patch scale", &sim.cfg.envScale, 1.0f, 24.0f);
-                ImGui::SliderFloat("Patch drift", &sim.cfg.envDrift, 0.0f, 0.01f, "%.4f");
                 ImGui::SliderFloat("Day/night speed", &sim.cfg.dayNightSpeed, 0.0f, 0.005f, "%.5f");
+                ImGui::SliderFloat("Day length", &sim.cfg.dayFraction, 0.5f, 0.9f, "%.2f");
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Share of each cycle that is daylight.\n0.5 = day == night; 0.67 = day 2x night; 0.75 = day 3x night");
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("World")) {
                 ImGui::SliderFloat("Spawn chance", &sim.cfg.spawnChance, 0.0f, 1.0f);
-                ImGui::SliderFloat("Instinct fraction", &sim.cfg.instinctFraction, 0.0f, 1.0f);
-                ImGui::TextDisabled("(applied on Regenerate)");
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("View")) {

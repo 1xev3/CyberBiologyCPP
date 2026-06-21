@@ -36,7 +36,7 @@ uniform uint uTick, uSeed;
 uniform float uPhoto, uMineralRate, uMetab, uHibMetab, uActionCost, uDivide,
               uGive, uAttack, uMaxHp, uRegen, uRegenCost,
               uMaxEnergy, uMaxMineral, uStartEnergy, uMutChance,
-              uTime, uEnvScale, uEnvDrift, uDayNight;
+              uTime, uEnvScale, uEnvDrift, uDayNight, uDayFrac;
 uniform int  uKinDist, uMaxAge, uMutCount, uMutDelta, uMarkerDrift;
 
 int idx(int x, int y) { return y * uW + x; }
@@ -82,7 +82,11 @@ float vnoise(vec2 p){ vec2 i=floor(p),f=fract(p); f=f*f*(3.0-2.0*f);
     float a=hash21(i),b=hash21(i+vec2(1,0)),c=hash21(i+vec2(0,1)),d=hash21(i+vec2(1,1));
     return mix(mix(a,b,f.x),mix(c,d,f.x),f.y); }
 float fbm(vec2 p){ float s=0.0,a=0.5; for(int o=0;o<4;o++){ s+=a*vnoise(p); p*=2.0; a*=0.5; } return s; }
-float dayMul(){ return (uDayNight>0.0001) ? (0.7+0.3*sin(uTime*uDayNight)) : 1.0; }
+float dayMul(){ if(uDayNight<=0.0001) return 1.0;
+    float f=fract(uTime*uDayNight*0.15915494); // cycle fraction 0..1 (=/(2*PI))
+    float D=clamp(uDayFrac,0.05,0.95); // daylight share of the cycle (>0.5 = longer days)
+    float ang=(f<D) ? (3.14159265*(f/D)) : (3.14159265+3.14159265*((f-D)/(1.0-D)));
+    return 0.7+0.3*sin(ang); }
 float lightAt(int x,int y){ vec2 uv=vec2(float(x),float(y))/float(uH);
     float pv=fbm(uv*uEnvScale + vec2(uTime*uEnvDrift,0.0));
     float vgrad=1.0 - float(y)/float(uH)*0.85;   // steep: top lit, bottom dark
@@ -310,7 +314,7 @@ layout(std430, binding=8) buffer B8 { float sig[]; };     // emitted pheromone f
 layout(std430, binding=11) buffer BC { uint  aliveCount[]; };
 
 uniform int uW, uH, uMode, uMaxAge;
-uniform float uTime, uEnvScale, uEnvDrift, uDayNight;
+uniform float uTime, uEnvScale, uEnvDrift, uDayNight, uDayFrac;
 
 vec3 rgb(uint c){ return vec3(float(c&0xFFu),float((c>>8)&0xFFu),float((c>>16)&0xFFu))/255.0; }
 float hash21(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return fract(p.x*p.y); }
@@ -318,7 +322,11 @@ float vnoise(vec2 p){ vec2 i=floor(p),f=fract(p); f=f*f*(3.0-2.0*f);
     float a=hash21(i),b=hash21(i+vec2(1,0)),c=hash21(i+vec2(0,1)),d=hash21(i+vec2(1,1));
     return mix(mix(a,b,f.x),mix(c,d,f.x),f.y); }
 float fbm(vec2 p){ float s=0.0,a=0.5; for(int o=0;o<4;o++){ s+=a*vnoise(p); p*=2.0; a*=0.5; } return s; }
-float dayMul(){ return (uDayNight>0.0001) ? (0.7+0.3*sin(uTime*uDayNight)) : 1.0; }
+float dayMul(){ if(uDayNight<=0.0001) return 1.0;
+    float f=fract(uTime*uDayNight*0.15915494); // cycle fraction 0..1 (=/(2*PI))
+    float D=clamp(uDayFrac,0.05,0.95); // daylight share of the cycle (>0.5 = longer days)
+    float ang=(f<D) ? (3.14159265*(f/D)) : (3.14159265+3.14159265*((f-D)/(1.0-D)));
+    return 0.7+0.3*sin(ang); }
 float lightAt(int x,int y){ vec2 uv=vec2(float(x),float(y))/float(uH);
     float pv=fbm(uv*uEnvScale + vec2(uTime*uEnvDrift,0.0));
     return clamp(pv*(1.0-float(y)/float(uH)*0.85)*dayMul(),0.0,1.0); }
@@ -432,12 +440,12 @@ void GpuSimulation::cacheUniformLocations() {
         S("uGive"), S("uAttack"),
         S("uMaxHp"), S("uRegen"), S("uRegenCost"),
         S("uMaxEnergy"), S("uMaxMineral"), S("uStartEnergy"), S("uMutChance"),
-        S("uEnvScale"), S("uEnvDrift"), S("uDayNight"),
+        S("uEnvScale"), S("uEnvDrift"), S("uDayNight"), S("uDayFrac"),
         S("uKinDist"), S("uMaxAge"), S("uMutCount"), S("uMutDelta"), S("uMarkerDrift"),
     };
     auto C = [&](const char* nm){ return glGetUniformLocation(colorProg_, nm); };
     cl_ = ColLoc{ C("uW"), C("uH"), C("uMode"), C("uMaxAge"),
-                  C("uTime"), C("uEnvScale"), C("uEnvDrift"), C("uDayNight") };
+                  C("uTime"), C("uEnvScale"), C("uEnvDrift"), C("uDayNight"), C("uDayFrac") };
 }
 
 bool GpuSimulation::init(const WorldState& seed, const Config& cfg) {
@@ -520,7 +528,7 @@ void GpuSimulation::setSimUniforms() {
     glUniform1f(sl_.maxEnergy, cfg_.maxEnergy); glUniform1f(sl_.maxMineral, cfg_.maxMineral);
     glUniform1f(sl_.startEnergy, cfg_.startEnergy); glUniform1f(sl_.mutChance, cfg_.mutationChance);
     glUniform1f(sl_.envScale, cfg_.envScale); glUniform1f(sl_.envDrift, cfg_.envDrift);
-    glUniform1f(sl_.dayNight, cfg_.dayNightSpeed);
+    glUniform1f(sl_.dayNight, cfg_.dayNightSpeed); glUniform1f(sl_.dayFrac, cfg_.dayFraction);
     glUniform1i(sl_.kinDist, cfg_.kinMarkerDist); glUniform1i(sl_.maxAge, cfg_.maxAge);
     glUniform1i(sl_.mutCount, cfg_.mutationCount); glUniform1i(sl_.mutDelta, cfg_.mutationDelta);
     glUniform1i(sl_.markerDrift, cfg_.markerDrift);
@@ -583,6 +591,7 @@ int GpuSimulation::colorize(DisplayMode mode, int maxAge) {
     glUniform1f(cl_.envScale, cfg_.envScale);
     glUniform1f(cl_.envDrift, cfg_.envDrift);
     glUniform1f(cl_.dayNight, cfg_.dayNightSpeed);
+    glUniform1f(cl_.dayFrac, cfg_.dayFraction);
 
     glDispatchCompute((width_ + 7) / 8, (height_ + 7) / 8, 1);
     glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT |

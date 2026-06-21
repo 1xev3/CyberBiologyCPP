@@ -63,11 +63,11 @@ private:
         int give, attack;
         int maxHp, regen, regenCost;
         int maxEnergy, maxMineral, startEnergy, mutChance;
-        int envScale, envDrift, dayNight;
+        int envScale, envDrift, dayNight, dayFrac;
         int kinDist, maxAge, mutCount, mutDelta, markerDrift;
     } sl_{};
     struct ColLoc {
-        int W, H, mode, maxAge, time, envScale, envDrift, dayNight;
+        int W, H, mode, maxAge, time, envScale, envDrift, dayNight, dayFrac;
     } cl_{};
 };
 
