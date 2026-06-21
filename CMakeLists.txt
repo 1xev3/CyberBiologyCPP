@@ -17,14 +17,12 @@ set(TP "${CMAKE_SOURCE_DIR}/third_party")
 
 add_library(thirdparty STATIC
     ${TP}/imgui/imgui.cpp
-    ${TP}/imgui/imgui_demo.cpp
     ${TP}/imgui/imgui_draw.cpp
     ${TP}/imgui/imgui_tables.cpp
     ${TP}/imgui/imgui_widgets.cpp
     ${TP}/imgui/imgui_impl_glfw.cpp
     ${TP}/imgui/imgui_impl_opengl3.cpp
     ${TP}/imgui/implot.cpp
-    ${TP}/imgui/implot_demo.cpp
     ${TP}/imgui/implot_items.cpp
     ${TP}/glfw/gl3w.c
 )
