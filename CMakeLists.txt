@@ -47,14 +47,17 @@ target_link_libraries(thirdparty PUBLIC
 # ---------------------------------------------------------------------------
 add_executable(CyberBiology
     src/app/main.cpp
-    src/sim/Bot.cpp
-    src/sim/World.cpp
-    src/sim/config.cpp
+    src/sim/WorldState.cpp
+    src/sim/Simulation.cpp
+    src/render/GridRenderer.cpp
+    src/io/WorldIO.cpp
     src/platform/Helpers.cpp
 )
 
 target_include_directories(CyberBiology PRIVATE
     src/sim
+    src/render
+    src/io
     src/platform
     src/app
 )
