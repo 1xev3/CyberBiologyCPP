@@ -12,6 +12,7 @@
 #include "Helpers.h"
 #include "Simulation.h"
 #include "GridRenderer.h"
+#include "GpuSimulation.h"
 #include "WorldIO.h"
 
 using namespace cb;
@@ -58,6 +59,9 @@ int main() {
     GridRenderer renderer;
     renderer.resize(gridW, gridH);
 
+    GpuSimulation gpu;
+    bool gpuMode = false;
+
     bool        paused        = true;
     int         stepsPerFrame = 1;
     DisplayMode mode          = DisplayMode::Work;
@@ -82,12 +86,22 @@ int main() {
 
         if (IsKeyPressedOnce(GLFW_KEY_SPACE)) paused = !paused;
 
-        if (!paused)
-            for (int s = 0; s < stepsPerFrame; ++s) sim.step();
-
-        const int alive = countAlive(sim.world);
+        const bool useGpu = gpuMode && gpu.available();
+        int alive;
+        unsigned int gridTex;
+        if (useGpu) {
+            gpu.setConfig(sim.cfg);
+            if (!paused) gpu.step(stepsPerFrame);
+            alive   = gpu.colorize(mode, sim.cfg.maxAge);
+            gridTex = gpu.textureId();
+        } else {
+            if (!paused)
+                for (int s = 0; s < stepsPerFrame; ++s) sim.step();
+            alive = countAlive(sim.world);
+            renderer.update(sim.world, mode, sim.cfg.maxAge);
+            gridTex = renderer.textureId();
+        }
         if (alive > maxAlive) maxAlive = alive;
-        renderer.update(sim.world, mode, sim.cfg.maxAge);
 
         // ---- World view ----------------------------------------------------
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
@@ -102,14 +116,14 @@ int main() {
         if (scale <= 0.0f) scale = 1.0f;
         ImVec2 imgSize(gridW * scale, gridH * scale);
         ImVec2 imgPos = ImGui::GetCursorScreenPos();
-        ImGui::Image((ImTextureID)(intptr_t)renderer.textureId(), imgSize);
+        ImGui::Image((ImTextureID)(intptr_t)gridTex, imgSize);
 
-        // Hover -> cell, and apply the active brush on left drag.
+        // Hover -> cell, and apply the active brush on left drag (CPU mode only).
         ImVec2 m = ImGui::GetMousePos();
         int cx = (int)((m.x - imgPos.x) / scale);
         int cy = (int)((m.y - imgPos.y) / scale);
         bool overGrid = sim.world.inBounds(cx, cy) && ImGui::IsWindowHovered();
-        if (overGrid && tool != Tool::None && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+        if (!useGpu && overGrid && tool != Tool::None && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
             int r2 = brushRadius * brushRadius;
             for (int dy = -brushRadius; dy <= brushRadius; ++dy)
                 for (int dx = -brushRadius; dx <= brushRadius; ++dx) {
@@ -135,7 +149,21 @@ int main() {
 
         if (ImGui::Button(paused ? "Resume" : "Pause")) paused = !paused;
         ImGui::SameLine();
-        if (ImGui::Button("Regenerate")) { sim.generate(); maxAlive = 0; }
+        if (ImGui::Button("Regenerate")) {
+            sim.generate(); maxAlive = 0;
+            if (gpuMode && gpu.available()) gpu.upload(sim.world);
+        }
+
+        if (ImGui::Checkbox("GPU (compute shader)", &gpuMode)) {
+            if (gpuMode) {
+                if (!gpu.available()) { if (!gpu.init(sim.world, sim.cfg)) gpuMode = false; }
+                else gpu.upload(sim.world);
+            } else if (gpu.available()) {
+                gpu.download(sim.world);  // sync GPU state back to CPU
+            }
+        }
+        if (gpuMode && !gpu.available()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "GPU init failed (needs GL 4.3)");
+        else ImGui::TextDisabled(useGpu ? "Running on GPU" : "Running on CPU (brush tools enabled)");
 
         ImGui::SeparatorText("Info");
         ImGui::Text("Grid: %d x %d  (%d cells)", gridW, gridH, gridW * gridH);
@@ -172,11 +200,16 @@ int main() {
 
         if (ImGui::CollapsingHeader("Save / Load")) {
             ImGui::InputText("File", saveName.data(), saveName.capacity());
-            if (ImGui::Button("Save")) saveWorld(sim.world, std::string(kSaveDir) + "/" + saveName.c_str());
+            if (ImGui::Button("Save")) {
+                if (useGpu) gpu.download(sim.world);
+                saveWorld(sim.world, std::string(kSaveDir) + "/" + saveName.c_str());
+            }
             ImGui::SameLine();
             if (ImGui::Button("Load")) {
-                if (loadWorld(sim.world, std::string(kSaveDir) + "/" + saveName.c_str()))
+                if (loadWorld(sim.world, std::string(kSaveDir) + "/" + saveName.c_str())) {
                     renderer.resize(sim.world.width, sim.world.height);
+                    if (gpuMode && gpu.available()) gpu.upload(sim.world);
+                }
             }
         }
 

@@ -49,6 +49,7 @@ add_executable(CyberBiology
     src/app/main.cpp
     src/sim/WorldState.cpp
     src/sim/Simulation.cpp
+    src/sim/GpuSimulation.cpp
     src/render/GridRenderer.cpp
     src/io/WorldIO.cpp
     src/platform/Helpers.cpp

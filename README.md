@@ -30,13 +30,30 @@ cmake --build build --config Release
 The executable is written to `build/bin/Release/CyberBiology.exe`, with `fonts/`,
 `saves/` and `bots/` placed alongside it automatically.
 
+## Simulation backends
+
+The world is a flat structure-of-arrays grid (`WorldState`) advanced by a
+race-free **9-phase** update: each tick runs nine passes over the cells of a 3×3
+sublattice, so every acting cell only touches its own disjoint Moore
+neighborhood. Two interchangeable backends implement it:
+
+- **CPU** (`Simulation`) — parallelized across cores with
+  `std::execution::par` over the write-disjoint sublattice rows. Toggle off the
+  "GPU" checkbox to use it; brush editing tools are available here.
+- **GPU** (`GpuSimulation`) — the genome VM ported to an OpenGL compute shader
+  with all state in SSBOs; nine `glDispatchCompute` calls per tick and a second
+  compute pass that colorizes straight into the display texture (no CPU
+  round-trip). Enable the "GPU (compute shader)" checkbox. **Requires an OpenGL
+  4.3 core context.**
+
+The grid is drawn as a single texture (one texel per cell), so rendering cost is
+one draw call regardless of world size.
+
 ## Roadmap
 
-The codebase is being refactored toward much larger simulations:
+All four refactor stages are complete:
 
-- **A. Foundation** — CMake build, modular `src/` layout, vendored deps isolated. *(done)*
-- **B. SoA core** — flat structure-of-arrays world state, a race-free 9-phase
-  (3×3 sublattice) update, and texture-based rendering instead of per-cell draws.
-- **C. CPU parallelism** — parallelize the 9-phase update across cores.
-- **D. GPU compute** — port the genome VM to a compute shader (state in SSBOs)
-  to reach very large grids.
+- **A. Foundation** — CMake build, modular `src/` layout, vendored deps isolated.
+- **B. SoA core** — flat world state, race-free 9-phase update, texture rendering.
+- **C. CPU parallelism** — parallel 9-phase update (~6× on 20 cores).
+- **D. GPU compute** — genome VM as a compute shader for very large grids.
