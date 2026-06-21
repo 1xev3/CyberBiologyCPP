@@ -69,6 +69,17 @@ if(MSVC)
     set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT CyberBiology)
 endif()
 
+# Headless throughput benchmark (serial vs parallel step).
+add_executable(bench
+    src/app/bench.cpp
+    src/sim/WorldState.cpp
+    src/sim/Simulation.cpp
+)
+target_include_directories(bench PRIVATE src/sim)
+if(MSVC)
+    target_compile_options(bench PRIVATE /utf-8)
+endif()
+
 # Copy runtime assets next to the executable so it can be launched in-place.
 add_custom_command(TARGET CyberBiology POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
