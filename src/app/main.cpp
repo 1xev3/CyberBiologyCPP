@@ -11,7 +11,7 @@
 #include <atomic> 
 #include <mutex>
 
-// Графика
+// пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
@@ -20,12 +20,6 @@
 #include "GLFW/glfw3.h"
 
 #include "World.h"
-
-#define _CRTDBG_MAP_ALLOC
-#include <crtdbg.h>
-#define DEBUG_NEW new(_NORMAL_BLOCK, __FILE__, __LINE__)
-#define new DEBUG_NEW
-
 
 using namespace std;
 
@@ -158,7 +152,7 @@ int main() {
 
 
         glfwGetFramebufferSize(window, &display_w, &display_h); //Calculation window size
-        glfwGetCursorPos(window, &mx, &my); // Позиция курсора
+        glfwGetCursorPos(window, &mx, &my); // пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
         mouse_square = world.GetPosByMouse((float)mx, (float)my);
 
         //click test (RMB)
@@ -292,7 +286,7 @@ int main() {
                         mouse_clicked = false;
                     }
 
-                    //Если зажата левая кнопка мыши.
+                    //пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ.
                     if (IsMouseKeyDown(GLFW_MOUSE_BUTTON_1) && (mouse_square.first > 0 && mouse_square.second > 0) && SELECTION_CAN_CHANGE) {
                         bool old_value = pause;
                         pause = true;

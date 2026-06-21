@@ -1,5 +1,4 @@
 #pragma once
-void DefaultStyle();
 
 extern const char* SAVES_WORLD_FOLDER;
 extern const char* SAVES_BOTS_FOLDER;
