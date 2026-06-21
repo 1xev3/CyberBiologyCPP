@@ -12,7 +12,6 @@
 
 #include "Helpers.h"
 #include "Simulation.h"
-#include "GridRenderer.h"
 #include "GpuSimulation.h"
 #include "WorldIO.h"
 
@@ -22,17 +21,10 @@ namespace {
 
 constexpr const char* kSaveDir = "saves";
 
-// Round up to a multiple of 3 so the 9-phase sublattice tiles the grid evenly
-// (required once the update is parallelized).
+// Round up to a multiple of 3 so the 9-phase sublattice tiles the grid evenly.
 int roundTo3(int v) { return ((v + 2) / 3) * 3; }
 
 float clampf(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
-
-int countAlive(const WorldState& w) {
-    int alive = 0;
-    for (uint8_t k : w.kind) alive += (k == (uint8_t)Cell::Alive);
-    return alive;
-}
 
 void error_callback(int error, const char* description) {
     fprintf(stderr, "GLFW Error %d: %s\n", error, description);
@@ -52,31 +44,26 @@ int main() {
 
     ImPlot::CreateContext();
 
-    // World is now decoupled from on-screen pixel size: pick a large cell grid
-    // and display it scaled into the view.
     const int gridW = roundTo3(600);
     const int gridH = roundTo3(400);
-    Simulation sim(gridW, gridH);
+    Simulation sim(gridW, gridH);   // CPU side: seeding, save/load, editing only
     sim.generate();
 
-    GridRenderer renderer;
-    renderer.resize(gridW, gridH);
-
     GpuSimulation gpu;
-    bool gpuMode = false;
+    const bool gpuOk = gpu.init(sim.world, sim.cfg);
+    bool worldSynced = true;        // does sim.world mirror the live GPU state?
 
-    float  zoom = 1.0f;          // 1.0 = fit grid to view
-    ImVec2 pan(0.0f, 0.0f);      // pixel offset of the grid within the view
-    bool   recenter = true;      // request to center the grid in the view
+    float  zoom = 1.0f;
+    ImVec2 pan(0.0f, 0.0f);
+    bool   recenter = true;
 
     bool        paused        = true;
     int         stepsPerFrame = 1;
-    DisplayMode mode          = DisplayMode::Work;
+    DisplayMode mode          = DisplayMode::Family;
     int         maxAlive      = 0;
 
-    // Editing tools
     enum class Tool { None, Spawn, Erase };
-    Tool tool       = Tool::None;
+    Tool tool        = Tool::None;
     int  brushRadius = 4;
 
     std::string saveName = "world.cbw";
@@ -84,6 +71,9 @@ int main() {
 
     ScrollingBuffer popBuf;
     float plotT = 0.0f;
+
+    // Pull the live GPU world into sim.world so it can be edited/saved.
+    auto syncDown = [&]() { if (!worldSynced) { gpu.download(sim.world); worldSynced = true; } };
 
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
@@ -93,20 +83,13 @@ int main() {
 
         if (IsKeyPressedOnce(GLFW_KEY_SPACE)) paused = !paused;
 
-        const bool useGpu = gpuMode && gpu.available();
-        int alive;
-        unsigned int gridTex;
-        if (useGpu) {
+        int alive = 0;
+        unsigned int gridTex = 0;
+        if (gpuOk) {
             gpu.setConfig(sim.cfg);
-            if (!paused) gpu.step(stepsPerFrame);
+            if (!paused) { gpu.step(stepsPerFrame); worldSynced = false; }
             alive   = gpu.colorize(mode, sim.cfg.maxAge);
             gridTex = gpu.textureId();
-        } else {
-            if (!paused)
-                for (int s = 0; s < stepsPerFrame; ++s) sim.step();
-            alive = countAlive(sim.world);
-            renderer.update(sim.world, mode, sim.cfg.maxAge);
-            gridTex = renderer.textureId();
         }
         if (alive > maxAlive) maxAlive = alive;
 
@@ -127,7 +110,6 @@ int main() {
         ImVec2 m = ImGui::GetMousePos();
         bool hovered = ImGui::IsWindowHovered();
 
-        // Zoom on the wheel, keeping the cell under the cursor pinned.
         if (hovered && ImGui::GetIO().MouseWheel != 0.0f) {
             float oldScale = fit * zoom;
             float gx = (m.x - viewPos.x - pan.x) / oldScale;
@@ -137,7 +119,6 @@ int main() {
             pan.x = m.x - viewPos.x - gx * newScale;
             pan.y = m.y - viewPos.y - gy * newScale;
         }
-        // Pan: middle-drag always, or left-drag when no brush tool is active.
         bool panDrag = ImGui::IsMouseDragging(ImGuiMouseButton_Middle) ||
                        (tool == Tool::None && ImGui::IsMouseDragging(ImGuiMouseButton_Left));
         if (hovered && panDrag) { pan.x += ImGui::GetIO().MouseDelta.x; pan.y += ImGui::GetIO().MouseDelta.y; }
@@ -145,21 +126,20 @@ int main() {
         float scale = fit * zoom;
         ImVec2 imgSize(gridW * scale, gridH * scale);
         if (recenter) { pan = ImVec2((avail.x - imgSize.x) * 0.5f, (avail.y - imgSize.y) * 0.5f); recenter = false; }
-        // Allow the camera to leave the field by up to 3x the field size on each
-        // side, so the grid can be pushed well off the edges.
         float marginX = imgSize.x * 3.0f, marginY = imgSize.y * 3.0f;
         pan.x = clampf(pan.x, avail.x - imgSize.x - marginX, marginX);
         pan.y = clampf(pan.y, avail.y - imgSize.y - marginY, marginY);
 
         ImVec2 imgPos(viewPos.x + pan.x, viewPos.y + pan.y);
         ImGui::SetCursorScreenPos(imgPos);
-        ImGui::Image((ImTextureID)(intptr_t)gridTex, imgSize);
+        if (gridTex) ImGui::Image((ImTextureID)(intptr_t)gridTex, imgSize);
 
-        // Hover -> cell, and apply the active brush on left drag (CPU mode only).
+        // Brush editing: edit CPU world, then re-upload to the GPU.
         int cx = (int)((m.x - imgPos.x) / scale);
         int cy = (int)((m.y - imgPos.y) / scale);
         bool overGrid = sim.world.inBounds(cx, cy) && hovered;
-        if (!useGpu && overGrid && tool != Tool::None && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+        if (gpuOk && overGrid && tool != Tool::None && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+            syncDown();
             int r2 = brushRadius * brushRadius;
             for (int dy = -brushRadius; dy <= brushRadius; ++dy)
                 for (int dx = -brushRadius; dx <= brushRadius; ++dx) {
@@ -171,10 +151,12 @@ int main() {
                     else if (tool == Tool::Spawn && sim.world.kind[i] == (uint8_t)Cell::Empty)
                         sim.spawnBot(i);
                 }
+            gpu.upload(sim.world);
         }
 
         ImDrawList* dl = ImGui::GetWindowDrawList();
-        std::string overlay = "Alive: " + std::to_string(alive);
+        std::string overlay = gpuOk ? "Alive: " + std::to_string(alive)
+                                    : "GPU init failed (needs OpenGL 4.3)";
         dl->AddText(ImVec2(7, 7), IM_COL32(0, 0, 0, 255), overlay.c_str());
         dl->AddText(ImVec2(6, 6), IM_COL32(255, 255, 255, 255), overlay.c_str());
         ImGui::End();
@@ -183,27 +165,19 @@ int main() {
         // ---- Controls ------------------------------------------------------
         ImGui::Begin("Settings", nullptr, ImGuiWindowFlags_NoFocusOnAppearing);
 
+        if (!gpuOk) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "GPU init failed (needs GL 4.3)");
+
         if (ImGui::Button(paused ? "Resume" : "Pause")) paused = !paused;
         ImGui::SameLine();
         if (ImGui::Button("Regenerate")) {
-            sim.generate(); maxAlive = 0;
-            if (gpuMode && gpu.available()) gpu.upload(sim.world);
+            sim.generate(); maxAlive = 0; worldSynced = true;
+            if (gpuOk) gpu.upload(sim.world);
         }
-
-        if (ImGui::Checkbox("GPU (compute shader)", &gpuMode)) {
-            if (gpuMode) {
-                if (!gpu.available()) { if (!gpu.init(sim.world, sim.cfg)) gpuMode = false; }
-                else gpu.upload(sim.world);
-            } else if (gpu.available()) {
-                gpu.download(sim.world);  // sync GPU state back to CPU
-            }
-        }
-        if (gpuMode && !gpu.available()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "GPU init failed (needs GL 4.3)");
-        else ImGui::TextDisabled(useGpu ? "Running on GPU" : "Running on CPU (brush tools enabled)");
 
         ImGui::SeparatorText("Info");
         ImGui::Text("Grid: %d x %d  (%d cells)", gridW, gridH, gridW * gridH);
         ImGui::Text("Alive: %d", alive);
+        ImGui::Text("Tick: %llu", (unsigned long long)gpu.ticks());
         ImGui::Text("%.1f FPS (%.2f ms)", ImGui::GetIO().Framerate, 1000.0f / ImGui::GetIO().Framerate);
         ImGui::SliderInt("Steps / frame", &stepsPerFrame, 1, 32);
 
@@ -213,21 +187,38 @@ int main() {
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Wheel = zoom, middle-drag (or left-drag with no tool) = pan");
 
-        if (ImGui::CollapsingHeader("Parameters")) {
-            ImGui::SliderFloat("Photosynthesis", &sim.cfg.photoEnergy, 0.0f, 4.0f);
+        if (ImGui::CollapsingHeader("Life", ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::SliderFloat("Photosynthesis", &sim.cfg.photoEnergy, 0.0f, 20.0f);
+            ImGui::SliderFloat("Mineral rate", &sim.cfg.mineralRate, 0.0f, 20.0f);
+            ImGui::SliderFloat("Live cost", &sim.cfg.liveCost, 0.0f, 10.0f);
+            ImGui::SliderFloat("Divide cost", &sim.cfg.doubleCost, 10.0f, 500.0f);
+            ImGui::SliderInt("Max age", &sim.cfg.maxAge, 100, 20000);
+            ImGui::SliderInt("Kin color dist", &sim.cfg.kinColorDist, 0, 128);
+        }
+
+        if (ImGui::CollapsingHeader("Evolution")) {
             ImGui::SliderFloat("Mutation chance", &sim.cfg.mutationChance, 0.0f, 1.0f);
-            ImGui::SliderFloat("Live cost", &sim.cfg.liveCost, 1.0f, 50.0f);
-            ImGui::SliderInt("Max age", &sim.cfg.maxAge, 1, 10000);
+            ImGui::SliderInt("Mutation count", &sim.cfg.mutationCount, 1, 32);
+            ImGui::SliderInt("Mutation delta", &sim.cfg.mutationDelta, 1, 64);
+        }
+
+        if (ImGui::CollapsingHeader("Environment")) {
+            ImGui::SliderFloat("Patch scale", &sim.cfg.envScale, 1.0f, 24.0f);
+            ImGui::SliderFloat("Patch drift", &sim.cfg.envDrift, 0.0f, 0.5f);
+            ImGui::SliderFloat("Day/night speed", &sim.cfg.dayNightSpeed, 0.0f, 0.2f);
+        }
+
+        if (ImGui::CollapsingHeader("World gen")) {
             ImGui::SliderFloat("Spawn chance", &sim.cfg.spawnChance, 0.0f, 1.0f);
+            ImGui::SliderFloat("Instinct fraction", &sim.cfg.instinctFraction, 0.0f, 1.0f);
         }
 
         if (ImGui::CollapsingHeader("Display", ImGuiTreeNodeFlags_DefaultOpen)) {
             int m0 = (int)mode;
-            ImGui::RadioButton("Work", &m0, (int)DisplayMode::Work);
+            ImGui::RadioButton("Family / clan", &m0, (int)DisplayMode::Family);
             ImGui::RadioButton("Energy", &m0, (int)DisplayMode::Energy);
-            ImGui::RadioButton("Relative", &m0, (int)DisplayMode::Relative);
             ImGui::RadioButton("Age", &m0, (int)DisplayMode::Age);
-            ImGui::RadioButton("None", &m0, (int)DisplayMode::None);
+            ImGui::RadioButton("Environment", &m0, (int)DisplayMode::Environment);
             mode = (DisplayMode)m0;
         }
 
@@ -243,14 +234,14 @@ int main() {
         if (ImGui::CollapsingHeader("Save / Load")) {
             ImGui::InputText("File", saveName.data(), saveName.capacity());
             if (ImGui::Button("Save")) {
-                if (useGpu) gpu.download(sim.world);
+                syncDown();
                 saveWorld(sim.world, std::string(kSaveDir) + "/" + saveName.c_str());
             }
             ImGui::SameLine();
             if (ImGui::Button("Load")) {
                 if (loadWorld(sim.world, std::string(kSaveDir) + "/" + saveName.c_str())) {
-                    renderer.resize(sim.world.width, sim.world.height);
-                    if (gpuMode && gpu.available()) gpu.upload(sim.world);
+                    worldSynced = true;
+                    if (gpuOk) gpu.upload(sim.world);
                 }
             }
         }

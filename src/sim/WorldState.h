@@ -13,26 +13,22 @@ enum class Cell : uint8_t {
 
 // Structure-of-arrays world grid. Every per-cell attribute lives in its own
 // flat, contiguous array indexed by `y * width + x`. This layout is cache
-// friendly for the simulation sweep and maps directly onto GPU SSBOs later.
+// friendly and maps directly onto GPU SSBOs.
 //
-// Empty cells keep default attribute values; `kind` is the source of truth for
-// occupancy.
+// `kind` is the source of truth for occupancy. The genome holds the cell's
+// neural-network weights (one signed byte each, kGenomeSize of them).
 class WorldState {
 public:
     int width  = 0;
     int height = 0;
 
     std::vector<uint8_t> kind;       // Cell
-    std::vector<uint8_t> genome;     // width * height * kGenomeSize
-    std::vector<uint8_t> adr;        // genome program counter
-    std::vector<uint8_t> direction;  // 0..7
-    std::vector<uint8_t> mask;       // camouflage cycles remaining
+    std::vector<uint8_t> direction;  // facing 0..7
     std::vector<int32_t> age;
     std::vector<float>   energy;
     std::vector<float>   mineral;
-
-    std::vector<uint8_t> cr, cg, cb;  // display color
-    std::vector<uint8_t> fr, fg, fb;  // family ("relative") color
+    std::vector<uint8_t> genome;      // width*height*kGenomeSize quantized weights
+    std::vector<uint8_t> fr, fg, fb;  // family ("clan") color
 
     WorldState() = default;
     WorldState(int w, int h) { resize(w, h); }
@@ -50,7 +46,7 @@ public:
     const uint8_t* mindAt(int i) const { return &genome[(size_t)i * kGenomeSize]; }
 
     // Move all per-cell attributes from cell `from` to cell `to` and mark
-    // `from` Empty. Used by reproduction/movement.
+    // `from` Empty.
     void moveCell(int from, int to);
     void makeEmpty(int i);
 };

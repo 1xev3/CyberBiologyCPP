@@ -48,14 +48,12 @@ add_executable(CyberBiology
     src/sim/WorldState.cpp
     src/sim/Simulation.cpp
     src/sim/GpuSimulation.cpp
-    src/render/GridRenderer.cpp
     src/io/WorldIO.cpp
     src/platform/Helpers.cpp
 )
 
 target_include_directories(CyberBiology PRIVATE
     src/sim
-    src/render
     src/io
     src/platform
     src/app
@@ -66,17 +64,6 @@ target_link_libraries(CyberBiology PRIVATE thirdparty)
 if(MSVC)
     target_compile_options(CyberBiology PRIVATE /utf-8)
     set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT CyberBiology)
-endif()
-
-# Headless throughput benchmark (serial vs parallel step).
-add_executable(bench
-    src/app/bench.cpp
-    src/sim/WorldState.cpp
-    src/sim/Simulation.cpp
-)
-target_include_directories(bench PRIVATE src/sim)
-if(MSVC)
-    target_compile_options(bench PRIVATE /utf-8)
 endif()
 
 # Copy runtime assets next to the executable so it can be launched in-place.
