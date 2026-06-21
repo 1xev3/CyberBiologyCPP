@@ -1,4 +1,5 @@
 #include <cstdio>
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -24,6 +25,8 @@ constexpr const char* kSaveDir = "saves";
 // Round up to a multiple of 3 so the 9-phase sublattice tiles the grid evenly
 // (required once the update is parallelized).
 int roundTo3(int v) { return ((v + 2) / 3) * 3; }
+
+float clampf(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
 int countAlive(const WorldState& w) {
     int alive = 0;
@@ -61,6 +64,9 @@ int main() {
 
     GpuSimulation gpu;
     bool gpuMode = false;
+
+    float  zoom = 1.0f;          // 1.0 = fit grid to view
+    ImVec2 pan(0.0f, 0.0f);      // pixel offset of the grid within the view
 
     bool        paused        = true;
     int         stepsPerFrame = 1;
@@ -107,22 +113,48 @@ int main() {
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
         ImGui::Begin("World", nullptr,
                      ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove |
-                     ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoBringToFrontOnFocus);
+                     ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoBringToFrontOnFocus |
+                     ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
         ImGui::SetWindowPos(ImVec2(0, 0));
         ImGui::SetWindowSize(ImVec2(screenW * 0.8f, screenH * 0.8f));
 
         ImVec2 avail = ImGui::GetContentRegionAvail();
-        float scale = avail.x / gridW < avail.y / gridH ? avail.x / gridW : avail.y / gridH;
-        if (scale <= 0.0f) scale = 1.0f;
+        ImVec2 viewPos = ImGui::GetCursorScreenPos();
+        float fit = avail.x / gridW < avail.y / gridH ? avail.x / gridW : avail.y / gridH;
+        if (fit <= 0.0f) fit = 1.0f;
+
+        ImVec2 m = ImGui::GetMousePos();
+        bool hovered = ImGui::IsWindowHovered();
+
+        // Zoom on the wheel, keeping the cell under the cursor pinned.
+        if (hovered && ImGui::GetIO().MouseWheel != 0.0f) {
+            float oldScale = fit * zoom;
+            float gx = (m.x - viewPos.x - pan.x) / oldScale;
+            float gy = (m.y - viewPos.y - pan.y) / oldScale;
+            zoom = clampf(zoom * powf(1.15f, ImGui::GetIO().MouseWheel), 0.25f, 64.0f);
+            float newScale = fit * zoom;
+            pan.x = m.x - viewPos.x - gx * newScale;
+            pan.y = m.y - viewPos.y - gy * newScale;
+        }
+        // Pan: middle-drag always, or left-drag when no brush tool is active.
+        bool panDrag = ImGui::IsMouseDragging(ImGuiMouseButton_Middle) ||
+                       (tool == Tool::None && ImGui::IsMouseDragging(ImGuiMouseButton_Left));
+        if (hovered && panDrag) { pan.x += ImGui::GetIO().MouseDelta.x; pan.y += ImGui::GetIO().MouseDelta.y; }
+
+        float scale = fit * zoom;
         ImVec2 imgSize(gridW * scale, gridH * scale);
-        ImVec2 imgPos = ImGui::GetCursorScreenPos();
+        // Keep the grid in view: center when smaller than the viewport, else clamp.
+        pan.x = imgSize.x <= avail.x ? (avail.x - imgSize.x) * 0.5f : clampf(pan.x, avail.x - imgSize.x, 0.0f);
+        pan.y = imgSize.y <= avail.y ? (avail.y - imgSize.y) * 0.5f : clampf(pan.y, avail.y - imgSize.y, 0.0f);
+
+        ImVec2 imgPos(viewPos.x + pan.x, viewPos.y + pan.y);
+        ImGui::SetCursorScreenPos(imgPos);
         ImGui::Image((ImTextureID)(intptr_t)gridTex, imgSize);
 
         // Hover -> cell, and apply the active brush on left drag (CPU mode only).
-        ImVec2 m = ImGui::GetMousePos();
         int cx = (int)((m.x - imgPos.x) / scale);
         int cy = (int)((m.y - imgPos.y) / scale);
-        bool overGrid = sim.world.inBounds(cx, cy) && ImGui::IsWindowHovered();
+        bool overGrid = sim.world.inBounds(cx, cy) && hovered;
         if (!useGpu && overGrid && tool != Tool::None && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
             int r2 = brushRadius * brushRadius;
             for (int dy = -brushRadius; dy <= brushRadius; ++dy)
@@ -170,6 +202,12 @@ int main() {
         ImGui::Text("Alive: %d", alive);
         ImGui::Text("%.1f FPS (%.2f ms)", ImGui::GetIO().Framerate, 1000.0f / ImGui::GetIO().Framerate);
         ImGui::SliderInt("Steps / frame", &stepsPerFrame, 1, 32);
+
+        ImGui::Text("Zoom: %.0f%%", zoom * 100.0f);
+        ImGui::SameLine();
+        if (ImGui::Button("Reset view")) { zoom = 1.0f; pan = ImVec2(0, 0); }
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Wheel = zoom, middle-drag (or left-drag with no tool) = pan");
 
         if (ImGui::CollapsingHeader("Parameters")) {
             ImGui::SliderFloat("Photosynthesis", &sim.cfg.photoEnergy, 0.0f, 4.0f);
