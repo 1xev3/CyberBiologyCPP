@@ -14,7 +14,8 @@ void WorldState::resize(int w, int h) {
     energy.assign(n, 0.0f);
     mineral.assign(n, 0.0f);
     genome.assign(n * kGenomeSize, 0);   // byte 0 == signed weight 0
-    fr.assign(n, 0); fg.assign(n, 0); fb.assign(n, 0);
+    marker.assign(n, 0);
+    hibernating.assign(n, 0);
 }
 
 void WorldState::clear() {
@@ -31,7 +32,8 @@ void WorldState::moveCell(int from, int to) {
     age[to]       = age[from];
     energy[to]    = energy[from];
     mineral[to]   = mineral[from];
-    fr[to] = fr[from]; fg[to] = fg[from]; fb[to] = fb[from];
+    marker[to]    = marker[from];
+    hibernating[to] = hibernating[from];
 
     uint8_t*       dst = mindAt(to);
     const uint8_t* src = mindAt(from);

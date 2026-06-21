@@ -193,6 +193,8 @@ int main() {
                 ImGui::SliderFloat("Mineral rate", &sim.cfg.mineralRate, 0.0f, 20.0f);
                 ImGui::SliderFloat("Metabolism", &sim.cfg.metabolism, 0.0f, 5.0f);
                 if (ImGui::IsItemHovered()) ImGui::SetTooltip("Energy paid every tick just to stay alive");
+                ImGui::SliderFloat("Hibernation metabolism", &sim.cfg.hibernationMetab, 0.0f, 1.0f, "%.3f");
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Energy/tick while asleep; aging is frozen during hibernation");
                 ImGui::SliderFloat("Action cost", &sim.cfg.actionCost, 0.0f, 5.0f);
                 if (ImGui::IsItemHovered()) ImGui::SetTooltip("Energy paid for move / eat / give / divide / attack");
                 ImGui::SliderFloat("Divide cost", &sim.cfg.divideCost, 10.0f, 500.0f);
@@ -202,13 +204,14 @@ int main() {
             if (ImGui::BeginTabItem("Evolution")) {
                 ImGui::SliderFloat("Mutation rate", &sim.cfg.mutationChance, 0.0f, 1.0f);
                 ImGui::SliderInt("Mutation size", &sim.cfg.mutationDelta, 1, 64);
-                ImGui::SliderInt("Kin distance", &sim.cfg.kinColorDist, 0, 128);
+                ImGui::SliderInt("Kin distance", &sim.cfg.kinMarkerDist, 0, 200);
+                ImGui::SliderInt("Scent drift", &sim.cfg.markerDrift, 0, 32);
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Environment")) {
                 ImGui::SliderFloat("Patch scale", &sim.cfg.envScale, 1.0f, 24.0f);
                 ImGui::SliderFloat("Patch drift", &sim.cfg.envDrift, 0.0f, 0.01f, "%.4f");
-                ImGui::SliderFloat("Day/night speed", &sim.cfg.dayNightSpeed, 0.0f, 0.02f, "%.4f");
+                ImGui::SliderFloat("Day/night speed", &sim.cfg.dayNightSpeed, 0.0f, 0.005f, "%.5f");
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("World")) {

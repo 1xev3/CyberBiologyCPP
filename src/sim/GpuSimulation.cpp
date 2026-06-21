@@ -25,14 +25,15 @@ layout(std430, binding=2) buffer B2 { int   age[]; };
 layout(std430, binding=3) buffer B3 { float energy[]; };
 layout(std430, binding=4) buffer B4 { float mineral[]; };
 layout(std430, binding=5) buffer B5 { uint  genome[]; };
-layout(std430, binding=6) buffer B6 { uint  fam[]; };
+layout(std430, binding=6) buffer B6 { uint  marker[]; };  // packed RGB "scent" tag
+layout(std430, binding=7) buffer B7 { uint  hib[]; };     // 1 = hibernating (asleep)
 
 uniform int  uW, uH, uPhase, uActW, uActH;
 uniform uint uTick, uSeed;
-uniform float uPhoto, uMineralRate, uMetab, uActionCost, uDivide,
+uniform float uPhoto, uMineralRate, uMetab, uHibMetab, uActionCost, uDivide,
               uMaxEnergy, uMaxMineral, uStartEnergy, uMutChance,
               uTime, uEnvScale, uEnvDrift, uDayNight;
-uniform int  uKinDist, uMaxAge, uMutCount, uMutDelta;
+uniform int  uKinDist, uMaxAge, uMutCount, uMutDelta, uMarkerDrift;
 
 int idx(int x, int y) { return y * uW + x; }
 
@@ -44,13 +45,17 @@ void setByte(int i, int k, int v) {
 }
 float wt(int i, int k) { int b = gbyte(i,k); if (b > 127) b -= 256; return float(b) * WSCALE; }
 
-void unpackFam(uint c, out int r, out int g, out int b) { r=int(c&0xFFu); g=int((c>>8)&0xFFu); b=int((c>>16)&0xFFu); }
-uint packFam(int r, int g, int b) { return uint(clamp(r,0,255)) | (uint(clamp(g,0,255))<<8) | (uint(clamp(b,0,255))<<16); }
-
-// kin = similar family color (cheap clan tag that drifts on mutation)
+// kin = matching "scent". Each cell carries a 3-byte RGB marker that is heritable
+// and drifts on mutating reproduction, independent of the behavior weights. Like
+// an ant colony odor / MHC self-marker: recognition compares only the tag, so a
+// lineage can in principle evolve a marker that mimics another's. Cheap: two
+// loads and an L1 over three channels.
 bool isRel(int s, int o) {
-    int r1,g1,b1,r2,g2,b2; unpackFam(fam[s],r1,g1,b1); unpackFam(fam[o],r2,g2,b2);
-    return (abs(r1-r2)+abs(g1-g2)+abs(b1-b2)) <= uKinDist;
+    uint ms = marker[s], mo = marker[o];
+    int dr = abs(int(ms & 0xFFu)        - int(mo & 0xFFu));
+    int dg = abs(int((ms >> 8)  & 0xFFu) - int((mo >> 8)  & 0xFFu));
+    int db = abs(int((ms >> 16) & 0xFFu) - int((mo >> 16) & 0xFFu));
+    return (dr + dg + db) <= uKinDist;
 }
 
 // --- per-cell rng ----------------------------------------------------------
@@ -85,8 +90,9 @@ float mineralAt(int x,int y){ vec2 uv=vec2(float(x),float(y))/float(uH);
 
 // --- actions (act in the facing direction) ---------------------------------
 void moveCell(int i,int j){
-    kind[j]=kind[i]; dir[j]=dir[i]; age[j]=age[i]; energy[j]=energy[i]; mineral[j]=mineral[i]; fam[j]=fam[i];
+    kind[j]=kind[i]; dir[j]=dir[i]; age[j]=age[i]; energy[j]=energy[i]; mineral[j]=mineral[i];
     for(int k=0;k<GW;k++) genome[j*GW+k]=genome[i*GW+k];
+    marker[j]=marker[i]; hib[j]=hib[i];
     kind[i]=0u;
 }
 void doMove(int i,int x,int y){ uint f=dir[i]; int xt=frontX(x,f),yt=frontY(y,f);
@@ -105,7 +111,7 @@ void doEat(int i,int x,int y){ uint f=dir[i]; int xt=frontX(x,f),yt=frontY(y,f);
 
 void doGive(int i,int x,int y){ uint f=dir[i]; int xt=frontX(x,f),yt=frontY(y,f);
     if(yt<0||yt>=uH) return; int j=idx(xt,yt);
-    if(kind[j]!=1u) return; if(!isRel(i,j)) return;
+    if(kind[j]!=1u) return;
     float h=energy[i]*0.25; energy[i]-=h; energy[j]+=h; if(energy[j]>uMaxEnergy) energy[j]=uMaxEnergy; }
 
 int findEmpty(int x,int y,uint f){ for(int n=0;n<8;n++){ int yt=nbY(y,f,n); if(yt<0||yt>=uH) continue;
@@ -113,21 +119,27 @@ int findEmpty(int x,int y,uint f){ for(int n=0;n<8;n++){ int yt=nbY(y,f,n); if(y
 
 void mutateChild(int j){
     for(int m=0;m<uMutCount;m++){ int k=rint(GN); int b=gbyte(j,k); if(b>127)b-=256;
-        b += rint(2*uMutDelta+1)-uMutDelta; b=clamp(b,-128,127); setByte(j,k,b); }
-    int r,g,bb; unpackFam(fam[j],r,g,bb); r+=rint(13)-6; g+=rint(13)-6; bb+=rint(13)-6; fam[j]=packFam(r,g,bb); }
+        int nb=clamp(b + rint(2*uMutDelta+1)-uMutDelta, -128, 127); setByte(j,k,nb); }
+    // drift the scent marker independently of the behavior weights
+    uint mk=marker[j];
+    int r=int(mk&0xFFu), g=int((mk>>8)&0xFFu), bb=int((mk>>16)&0xFFu);
+    r =clamp(r +rint(2*uMarkerDrift+1)-uMarkerDrift, 0, 255);
+    g =clamp(g +rint(2*uMarkerDrift+1)-uMarkerDrift, 0, 255);
+    bb=clamp(bb+rint(2*uMarkerDrift+1)-uMarkerDrift, 0, 255);
+    marker[j]=uint(r)|(uint(g)<<8)|(uint(bb)<<16); }
 
 void doDouble(int i,int x,int y){ if(energy[i]<uDivide) return;
     int n=findEmpty(x,y,dir[i]); if(n==8) return;
     energy[i]-=uDivide;
     int xt=nbX(x,dir[i],n),yt=nbY(y,dir[i],n); int j=idx(xt,yt);
-    kind[j]=1u; dir[j]=dir[i]; age[j]=0; fam[j]=fam[i];
+    kind[j]=1u; dir[j]=dir[i]; age[j]=0; marker[j]=marker[i]; hib[j]=0u;
     for(int k=0;k<GW;k++) genome[j*GW+k]=genome[i*GW+k];
     energy[i]*=0.5; energy[j]=energy[i]; mineral[i]*=0.5; mineral[j]=mineral[i];
     if(rfloat()<uMutChance) mutateChild(j); }
 
 void doAttack(int i,int x,int y){ uint f=dir[i]; int xt=frontX(x,f),yt=frontY(y,f);
     if(yt<0||yt>=uH) return; int j=idx(xt,yt); if(kind[j]!=1u) return;
-    int k=rint(GN); setByte(j,k,gbyte(i,k)); }
+    int k=rint(GN); setByte(j,k,gbyte(i,k)); }   // injects a behavior gene, not the scent
 
 void main(){
     uint t = gl_GlobalInvocationID.x;
@@ -146,11 +158,20 @@ void main(){
     // --- senses ---
     uint f = dir[i];
     int fx=frontX(cx,f), fy=frontY(cy,f);
+    bool frontOn = (fy>=0 && fy<uH);
     int facedEmpty=0,facedKin=0,facedNon=0,facedOrg=0; float fe=0.0;
-    if(fy>=0 && fy<uH){ int j=idx(fx,fy); uint kj=kind[j];
+    float fmr=0.0,fmg=0.0,fmb=0.0;          // marker of the faced cell (0 if none)
+    if(frontOn){ int j=idx(fx,fy); uint kj=kind[j];
         if(kj==0u) facedEmpty=1; else if(kj==2u) facedOrg=1;
-        else { fe=energy[j]/uMaxEnergy; if(isRel(i,j)) facedKin=1; else facedNon=1; } }
+        else { fe=energy[j]/uMaxEnergy; if(isRel(i,j)) facedKin=1; else facedNon=1;
+               uint mj=marker[j]; fmr=float(mj&0xFFu)/255.0; fmg=float((mj>>8)&0xFFu)/255.0; fmb=float((mj>>16)&0xFFu)/255.0; } }
     else facedEmpty=1;
+    // resources in the faced cell: comparing these to the cell's own light/mineral
+    // gives a directional gradient, so the net can follow the drifting fields.
+    float frontLight = frontOn ? lightAt(fx,fy)   : 0.0;
+    float frontMin   = frontOn ? mineralAt(fx,fy) : 0.0;
+    uint mi=marker[i];                       // own marker
+    float omr=float(mi&0xFFu)/255.0, omg=float((mi>>8)&0xFFu)/255.0, omb=float((mi>>16)&0xFFu)/255.0;
     int kin=0,nonkin=0,org=0;
     for(int n=0;n<8;n++){ int yt=nbY(cy,f,n); if(yt<0||yt>=uH) continue; int xt=nbX(cx,f,n);
         uint kj=kind[idx(xt,yt)];
@@ -172,7 +193,10 @@ void main(){
     x[12]=float(nonkin)/8.0;
     x[13]=float(org)/8.0;
     x[14]=rfloat()*2.0-1.0;
-    x[15]=0.0;
+    x[15]=frontLight;        // env ahead (vs x[4]/x[5] here -> drift direction)
+    x[16]=frontMin;
+    x[17]=omr;  x[18]=omg;  x[19]=omb;   // own scent
+    x[20]=fmr;  x[21]=fmg;  x[22]=fmb;   // scent of the cell in front
 
     // --- forward: h = tanh(W1.x + b1); o = W2.h + b2 ---
     float o[NO];
@@ -185,14 +209,29 @@ void main(){
     }
 
     int act=0; float best=o[0];
-    for(int a=1;a<9;a++){ if(o[a]>best){ best=o[a]; act=a; } }
+    for(int a=1;a<10;a++){ if(o[a]>best){ best=o[a]; act=a; } }
+
+    // Hibernation (anabiosis). An asleep cell runs the net only to decide whether
+    // to keep sleeping: while hibernating the single available choice is to wake.
+    // It pays a tiny metabolism and does not age, so it can wait out famine/dark.
+    if(hib[i]==1u){
+        energy[i]-=uHibMetab;
+        if(act!=9) hib[i]=0u;           // chose something other than "sleep" -> wake (acts next tick)
+        if(energy[i]<=0.0) kind[i]=0u;
+        return;                         // no action, no aging while asleep
+    }
+    if(act==9){                         // awake cell decides to hibernate
+        hib[i]=1u; energy[i]-=uHibMetab;
+        if(energy[i]<=0.0) kind[i]=0u;
+        return;
+    }
 
     // active actions (move/eat/give/divide/attack) cost energy; photo/mineral/
     // rotate/idle only pay the per-tick metabolism below.
     if(act==1||act==5||act==6||act==7||act==8) energy[i]-=uActionCost;
 
     if(act==1) doMove(i,cx,cy);
-    else if(act==2) rotate(i,o[9]);
+    else if(act==2) rotate(i,o[10]);
     else if(act==3) photo(i,cx,cy);
     else if(act==4) mineralG(i,cx,cy);
     else if(act==5) doEat(i,cx,cy);
@@ -216,9 +255,9 @@ layout(rgba8, binding=0) uniform writeonly image2D uOut;
 layout(std430, binding=0) buffer B0 { uint  kind[]; };
 layout(std430, binding=2) buffer B2 { int   age[]; };
 layout(std430, binding=3) buffer B3 { float energy[]; };
-layout(std430, binding=5) buffer B5 { uint  genome[]; };
-layout(std430, binding=6) buffer B6 { uint  fam[]; };
-layout(std430, binding=7) buffer BC { uint  aliveCount[]; };
+layout(std430, binding=6) buffer B6 { uint  marker[]; };  // packed RGB "scent" tag
+layout(std430, binding=7) buffer B7 { uint  hib[]; };     // 1 = hibernating
+layout(std430, binding=9) buffer BC { uint  aliveCount[]; };
 
 uniform int uW, uH, uMode, uMaxAge;
 uniform float uTime, uEnvScale, uEnvDrift, uDayNight;
@@ -237,20 +276,11 @@ float mineralAt(int x,int y){ vec2 uv=vec2(float(x),float(y))/float(uH);
     float pv=fbm(uv*uEnvScale + vec2(13.7,7.3) - vec2(0.0,uTime*uEnvDrift));
     return clamp(pv*(0.5+float(y)/float(uH)*0.5),0.0,1.0); }
 
-// Genome fingerprint color: project the weight vector onto 3 fixed pseudo-random
-// directions -> RGB. Continuous, so similar genomes get similar colors and very
-// different genomes get very different colors. This makes the clan view reflect
-// real genetic distance rather than the (drifting) kin tag.
-int  gbyte(int i,int k){ return int((genome[i*GW + (k>>2)] >> uint((k&3)*8)) & 0xFFu); }
-float wt(int i,int k){ int b=gbyte(i,k); if(b>127) b-=256; return float(b)*WSCALE; }
-float projw(int k,int c){ uint h=uint(k)*747796405u + uint(c)*2891336453u;
-    h^=h>>15; h*=2246822519u; h^=h>>13; return float(h & 0xFFFFu)*(1.0/65535.0)*2.0 - 1.0; }
-vec3 genomeColor(int i){ float a=0.0,b=0.0,d=0.0;
-    for(int k=0;k<GN;k++){ float w=wt(i,k); a+=w*projw(k,0); b+=w*projw(k,1); d+=w*projw(k,2); }
-    vec3 c = clamp(vec3(0.5) + 0.20*vec3(a,b,d), 0.0, 1.0);
-    float l = dot(c, vec3(0.299,0.587,0.114));   // luminance
-    c = mix(vec3(l), c, 0.6);                     // desaturate toward gray
-    c = mix(c, vec3(0.8), 0.12);                  // soft pastel lift
+// Clan color = the cell's scent marker, the same tag isRel() recognizes, so what
+// you see on screen is exactly what the cells treat as kin. Lifted toward pastel
+// so colonies read clearly against the dark background.
+vec3 markerColor(int i){ vec3 c=rgb(marker[i]);
+    c = mix(c, vec3(0.85), 0.18);
     return c; }
 // Environment shown under cells. Brightness = how good the spot is (light +
 // minerals). Kept dim so living cells stand out on top.
@@ -268,17 +298,18 @@ void main(){
     vec3 c;
     if(uMode==3){                                    // Environment: full heatmap
         c = env;
-        if(k==1u)      c = mix(c, genomeColor(i), 0.75);
+        if(k==1u)      c = mix(c, markerColor(i), 0.75);
         else if(k==2u) c = mix(c, vec3(0.2), 0.6);
     } else {
         c = env * 0.22 + vec3(0.04);                 // dim env background
         if(k==2u)      c = mix(c, vec3(0.32), 0.85); // organic / dead
         else if(k==1u){
-            if(uMode==0)      c = genomeColor(i);    // Family / clan (genome)
+            if(uMode==0)      c = markerColor(i);    // Family / clan (scent marker)
             else if(uMode==1){ float e=energy[i]; c=vec3(min(e/1000.0,1.0), min(e/2000.0,1.0)*0.647, 0.0); }
             else if(uMode==2){ float a=clamp(float(age[i])/float(max(uMaxAge,1)),0.0,1.0); c=vec3(a,0.0,a); }
         }
     }
+    if(k==1u && hib[i]==1u) c = mix(c, vec3(0.10,0.16,0.34), 0.6);  // asleep: cold/dim
     imageStore(uOut, p, vec4(c,1.0));
 }
 )GLSL";
@@ -331,8 +362,22 @@ GpuSimulation::~GpuSimulation() {
     if (simProg_)   glDeleteProgram(simProg_);
     if (colorProg_) glDeleteProgram(colorProg_);
     if (tex_)       glDeleteTextures(1, &tex_);
-    if (counter_)   glDeleteBuffers(1, &counter_);
+    glDeleteBuffers(2, counter_);
     glDeleteBuffers(kNumBuffers, buf_);
+}
+
+void GpuSimulation::cacheUniformLocations() {
+    auto S = [&](const char* nm){ return glGetUniformLocation(simProg_, nm); };
+    sl_ = SimLoc{
+        S("uW"), S("uH"), S("uPhase"), S("uActW"), S("uActH"), S("uTick"), S("uSeed"), S("uTime"),
+        S("uPhoto"), S("uMineralRate"), S("uMetab"), S("uHibMetab"), S("uActionCost"), S("uDivide"),
+        S("uMaxEnergy"), S("uMaxMineral"), S("uStartEnergy"), S("uMutChance"),
+        S("uEnvScale"), S("uEnvDrift"), S("uDayNight"),
+        S("uKinDist"), S("uMaxAge"), S("uMutCount"), S("uMutDelta"), S("uMarkerDrift"),
+    };
+    auto C = [&](const char* nm){ return glGetUniformLocation(colorProg_, nm); };
+    cl_ = ColLoc{ C("uW"), C("uH"), C("uMode"), C("uMaxAge"),
+                  C("uTime"), C("uEnvScale"), C("uEnvDrift"), C("uDayNight") };
 }
 
 bool GpuSimulation::init(const WorldState& seed, const Config& cfg) {
@@ -342,13 +387,16 @@ bool GpuSimulation::init(const WorldState& seed, const Config& cfg) {
     simProg_   = compileCompute(simSrc.c_str());
     colorProg_ = compileCompute(colorSrc.c_str());
     if (!simProg_ || !colorProg_) return false;
+    cacheUniformLocations();
 
     width_ = seed.width; height_ = seed.height;
 
     glGenBuffers(kNumBuffers, buf_);
-    glGenBuffers(1, &counter_);
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, counter_);
-    glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(uint32_t), nullptr, GL_DYNAMIC_DRAW);
+    glGenBuffers(2, counter_);
+    for (int b = 0; b < 2; ++b) {
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, counter_[b]);
+        glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(uint32_t), nullptr, GL_DYNAMIC_DRAW);
+    }
 
     glGenTextures(1, &tex_);
     glBindTexture(GL_TEXTURE_2D, tex_);
@@ -388,31 +436,28 @@ void GpuSimulation::upload(const WorldState& w) {
             packed[(size_t)c * kGenomeWords + (k >> 2)] |= (uint32_t)m[k] << ((k & 3) * 8);
     }
     fill(5, packed.data(), packed.size() * sizeof(uint32_t));
-
-    std::vector<uint32_t> family(n);
-    for (int i = 0; i < n; ++i)
-        family[i] = w.fr[i] | ((uint32_t)w.fg[i] << 8) | ((uint32_t)w.fb[i] << 16);
-    fill(6, family.data(), n * sizeof(uint32_t));
+    fill(6, w.marker.data(), n * sizeof(uint32_t));
+    fill(7, w.hibernating.data(), n * sizeof(uint32_t));
 }
 
 void GpuSimulation::bindBuffers() const {
     for (int s = 0; s < kNumBuffers; ++s)
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, s, buf_[s]);
-    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 7, counter_);
 }
 
 void GpuSimulation::setSimUniforms() {
-    auto I = [&](const char* nm, int v){ glUniform1i(glGetUniformLocation(simProg_, nm), v); };
-    auto F = [&](const char* nm, float v){ glUniform1f(glGetUniformLocation(simProg_, nm), v); };
-    I("uW", width_); I("uH", height_);
-    F("uPhoto", cfg_.photoEnergy); F("uMineralRate", cfg_.mineralRate);
-    F("uMetab", cfg_.metabolism); F("uActionCost", cfg_.actionCost);
-    F("uDivide", cfg_.divideCost);
-    F("uMaxEnergy", cfg_.maxEnergy); F("uMaxMineral", cfg_.maxMineral);
-    F("uStartEnergy", cfg_.startEnergy); F("uMutChance", cfg_.mutationChance);
-    F("uEnvScale", cfg_.envScale); F("uEnvDrift", cfg_.envDrift); F("uDayNight", cfg_.dayNightSpeed);
-    I("uKinDist", cfg_.kinColorDist); I("uMaxAge", cfg_.maxAge);
-    I("uMutCount", cfg_.mutationCount); I("uMutDelta", cfg_.mutationDelta);
+    glUniform1i(sl_.W, width_); glUniform1i(sl_.H, height_);
+    glUniform1f(sl_.photo, cfg_.photoEnergy); glUniform1f(sl_.mineralRate, cfg_.mineralRate);
+    glUniform1f(sl_.metab, cfg_.metabolism); glUniform1f(sl_.hibMetab, cfg_.hibernationMetab);
+    glUniform1f(sl_.actionCost, cfg_.actionCost);
+    glUniform1f(sl_.divide, cfg_.divideCost);
+    glUniform1f(sl_.maxEnergy, cfg_.maxEnergy); glUniform1f(sl_.maxMineral, cfg_.maxMineral);
+    glUniform1f(sl_.startEnergy, cfg_.startEnergy); glUniform1f(sl_.mutChance, cfg_.mutationChance);
+    glUniform1f(sl_.envScale, cfg_.envScale); glUniform1f(sl_.envDrift, cfg_.envDrift);
+    glUniform1f(sl_.dayNight, cfg_.dayNightSpeed);
+    glUniform1i(sl_.kinDist, cfg_.kinMarkerDist); glUniform1i(sl_.maxAge, cfg_.maxAge);
+    glUniform1i(sl_.mutCount, cfg_.mutationCount); glUniform1i(sl_.mutDelta, cfg_.mutationDelta);
+    glUniform1i(sl_.markerDrift, cfg_.markerDrift);
 }
 
 void GpuSimulation::step(int ticks) {
@@ -420,19 +465,19 @@ void GpuSimulation::step(int ticks) {
     glUseProgram(simProg_);
     bindBuffers();
     setSimUniforms();
-    glUniform1ui(glGetUniformLocation(simProg_, "uSeed"), (uint32_t)seed_);
+    glUniform1ui(sl_.seed, (uint32_t)seed_);
 
     for (int t = 0; t < ticks; ++t) {
         ++tick_;
-        glUniform1ui(glGetUniformLocation(simProg_, "uTick"), (uint32_t)tick_);
-        glUniform1f(glGetUniformLocation(simProg_, "uTime"), (float)tick_);
+        glUniform1ui(sl_.tick, (uint32_t)tick_);
+        glUniform1f(sl_.time, (float)tick_);
         for (int phase = 0; phase < 9; ++phase) {
             int px = phase % 3, py = phase / 3;
             int actW = (width_  - px + 2) / 3;
             int actH = (height_ - py + 2) / 3;
-            glUniform1i(glGetUniformLocation(simProg_, "uPhase"), phase);
-            glUniform1i(glGetUniformLocation(simProg_, "uActW"), actW);
-            glUniform1i(glGetUniformLocation(simProg_, "uActH"), actH);
+            glUniform1i(sl_.phase, phase);
+            glUniform1i(sl_.actW, actW);
+            glUniform1i(sl_.actH, actH);
             GLuint groups = (GLuint)((actW * actH + 63) / 64);
             glDispatchCompute(groups, 1, 1);
             glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
@@ -442,30 +487,44 @@ void GpuSimulation::step(int ticks) {
 
 int GpuSimulation::colorize(DisplayMode mode, int maxAge) {
     if (!ok_) return 0;
+    const int cur  = curCounter_;
+    const int prev = cur ^ 1;
+
+    // Read last frame's count first: its GPU work finished a frame ago, so this
+    // does not stall the pipeline (a synchronous read of the current frame's
+    // counter would). The displayed alive count lags by one frame, which is
+    // imperceptible.
+    if (counterPrimed_) {
+        uint32_t alive = 0;
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, counter_[prev]);
+        glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, sizeof(alive), &alive);
+        lastAlive_ = (int)alive;
+    }
+
     uint32_t zero = 0;
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, counter_);
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, counter_[cur]);
     glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, sizeof(zero), &zero);
 
     glUseProgram(colorProg_);
     bindBuffers();
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 9, counter_[cur]);
     glBindImageTexture(0, tex_, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8);
-    glUniform1i(glGetUniformLocation(colorProg_, "uW"), width_);
-    glUniform1i(glGetUniformLocation(colorProg_, "uH"), height_);
-    glUniform1i(glGetUniformLocation(colorProg_, "uMode"), (int)mode);
-    glUniform1i(glGetUniformLocation(colorProg_, "uMaxAge"), maxAge);
-    glUniform1f(glGetUniformLocation(colorProg_, "uTime"), (float)tick_);
-    glUniform1f(glGetUniformLocation(colorProg_, "uEnvScale"), cfg_.envScale);
-    glUniform1f(glGetUniformLocation(colorProg_, "uEnvDrift"), cfg_.envDrift);
-    glUniform1f(glGetUniformLocation(colorProg_, "uDayNight"), cfg_.dayNightSpeed);
+    glUniform1i(cl_.W, width_);
+    glUniform1i(cl_.H, height_);
+    glUniform1i(cl_.mode, (int)mode);
+    glUniform1i(cl_.maxAge, maxAge);
+    glUniform1f(cl_.time, (float)tick_);
+    glUniform1f(cl_.envScale, cfg_.envScale);
+    glUniform1f(cl_.envDrift, cfg_.envDrift);
+    glUniform1f(cl_.dayNight, cfg_.dayNightSpeed);
 
     glDispatchCompute((width_ + 7) / 8, (height_ + 7) / 8, 1);
     glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT |
                     GL_SHADER_STORAGE_BARRIER_BIT | GL_BUFFER_UPDATE_BARRIER_BIT);
 
-    uint32_t alive = 0;
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, counter_);
-    glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, sizeof(alive), &alive);
-    return (int)alive;
+    curCounter_ = prev;
+    counterPrimed_ = true;
+    return lastAlive_;
 }
 
 void GpuSimulation::download(WorldState& w) const {
@@ -494,7 +553,10 @@ void GpuSimulation::download(WorldState& w) const {
             m[k] = (uint8_t)((packed[(size_t)c*kGenomeWords + (k>>2)] >> ((k&3)*8)) & 0xFF);
     }
 
-    get32(6); for (int i=0;i<n;++i){ w.fr[i]=u[i]&0xFF; w.fg[i]=(u[i]>>8)&0xFF; w.fb[i]=(u[i]>>16)&0xFF; }
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, buf_[6]);
+    glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, n * sizeof(uint32_t), w.marker.data());
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, buf_[7]);
+    glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, n * sizeof(uint32_t), w.hibernating.data());
 }
 
 } // namespace cb

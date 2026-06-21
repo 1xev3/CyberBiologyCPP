@@ -5,8 +5,8 @@
 
 namespace cb {
 
-// How the world texture is colorized. Family shows the clan (family) color so
-// territories/clans are visible; Environment shows the animated resource field.
+// How the world texture is colorized. Family shows the scent-marker clan color
+// so territories/clans are visible; Environment shows the animated resource field.
 enum class DisplayMode { Family, Energy, Age, Environment };
 
 // GPU backend: the whole world lives in OpenGL shader-storage buffers and one
@@ -34,8 +34,9 @@ public:
     uint64_t ticks() const { return tick_; }
 
 private:
-    void bindBuffers() const;
+    void bindBuffers() const;             // bind the 7 state SSBOs (slots 0..6)
     void setSimUniforms();
+    void cacheUniformLocations();         // query+store all uniform locations once
 
     bool ok_ = false;
     int  width_ = 0, height_ = 0;
@@ -45,9 +46,27 @@ private:
 
     unsigned int simProg_ = 0, colorProg_ = 0;
     unsigned int tex_ = 0;
-    unsigned int counter_ = 0;            // atomic alive counter
-    enum { kNumBuffers = 7 };
-    unsigned int buf_[kNumBuffers] = {0}; // kind,dir,age,energy,mineral,genome,fam
+    // Two atomic alive-counters used round-robin: each frame we read the one
+    // written last frame (already complete, so no GPU stall) while the current
+    // frame writes the other.
+    unsigned int counter_[2] = {0, 0};
+    int          curCounter_ = 0;
+    bool         counterPrimed_ = false;
+    int          lastAlive_ = 0;
+    enum { kNumBuffers = 8 };
+    unsigned int buf_[kNumBuffers] = {0}; // kind,dir,age,energy,mineral,genome,marker,hib
+
+    // Cached uniform locations (GLint stored as int to keep GL out of the header).
+    struct SimLoc {
+        int W, H, phase, actW, actH, tick, seed, time;
+        int photo, mineralRate, metab, hibMetab, actionCost, divide;
+        int maxEnergy, maxMineral, startEnergy, mutChance;
+        int envScale, envDrift, dayNight;
+        int kinDist, maxAge, mutCount, mutDelta, markerDrift;
+    } sl_{};
+    struct ColLoc {
+        int W, H, mode, maxAge, time, envScale, envDrift, dayNight;
+    } cl_{};
 };
 
 } // namespace cb

@@ -71,9 +71,8 @@ void Simulation::spawnBot(int i) {
     world.age[i]       = 0;
     world.energy[i]    = cfg.startEnergy;
     world.mineral[i]   = cfg.startEnergy * 0.5f;
-    world.fr[i] = (uint8_t)randInt(256);
-    world.fg[i] = (uint8_t)randInt(256);
-    world.fb[i] = (uint8_t)randInt(256);
+    world.marker[i]    = (uint32_t)randInt(256) | ((uint32_t)randInt(256) << 8) | ((uint32_t)randInt(256) << 16);
+    world.hibernating[i] = 0;
     seedWeights(i, randFloat() < cfg.instinctFraction);
 }
 

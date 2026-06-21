@@ -5,7 +5,7 @@
 namespace cb {
 
 namespace {
-constexpr char kMagic[4] = {'C', 'B', 'W', '3'};
+constexpr char kMagic[4] = {'C', 'B', 'W', '7'};
 
 template <class T>
 void writeVec(std::ofstream& o, const std::vector<T>& v) {
@@ -25,7 +25,7 @@ bool saveWorld(const WorldState& w, const std::string& path) {
     o.write(reinterpret_cast<const char*>(dims), sizeof(dims));
     writeVec(o, w.kind);   writeVec(o, w.direction); writeVec(o, w.age);
     writeVec(o, w.energy); writeVec(o, w.mineral);   writeVec(o, w.genome);
-    writeVec(o, w.fr); writeVec(o, w.fg); writeVec(o, w.fb);
+    writeVec(o, w.marker); writeVec(o, w.hibernating);
     return (bool)o;
 }
 
@@ -40,7 +40,7 @@ bool loadWorld(WorldState& w, const std::string& path) {
     w.resize(dims[0], dims[1]);
     readVec(in, w.kind);   readVec(in, w.direction); readVec(in, w.age);
     readVec(in, w.energy); readVec(in, w.mineral);   readVec(in, w.genome);
-    readVec(in, w.fr); readVec(in, w.fg); readVec(in, w.fb);
+    readVec(in, w.marker); readVec(in, w.hibernating);
     return (bool)in;
 }
 

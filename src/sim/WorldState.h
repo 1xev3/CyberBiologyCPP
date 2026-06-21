@@ -28,7 +28,8 @@ public:
     std::vector<float>   energy;
     std::vector<float>   mineral;
     std::vector<uint8_t> genome;      // width*height*kGenomeSize quantized weights
-    std::vector<uint8_t> fr, fg, fb;  // family ("clan") color
+    std::vector<uint32_t> marker;     // packed RGB "scent" tag (clan identity)
+    std::vector<uint32_t> hibernating;// 1 = in anabiosis (asleep), 0 = awake
 
     WorldState() = default;
     WorldState(int w, int h) { resize(w, h); }
