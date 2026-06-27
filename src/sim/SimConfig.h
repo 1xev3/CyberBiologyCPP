@@ -45,8 +45,8 @@ constexpr float kWeightScale = 1.0f / 32.0f;
 // All tunable simulation parameters in one place.
 struct Config {
     float startEnergy       = 120.0f;
-    float photoEnergy       = 4.5f;    // max photosynthesis gain (x light field)
-    float mineralRate       = 3.1f;    // max mineral->energy gain (x mineral field)
+    float photoEnergy       = 4.0f;    // max photosynthesis gain (x light field)
+    float mineralRate       = 4.0f;    // max mineral->energy gain (x mineral field)
     float metabolism        = 1.0f;    // energy cost of being alive, per tick
     float hibernationMetab  = 0.05f;   // energy/tick while hibernating (aging is frozen)
     float actionCost        = 0.5f;    // cost of any active action (move/eat/give/divide/attack)
@@ -68,10 +68,10 @@ struct Config {
     int   mutationDelta     = 12;      // +/- magnitude of a weight nudge (bytes)
     int   markerDrift       = 2;       // +/- per-channel drift of the scent marker on a mutating birth
 
-    // Environment (animated fBm fields sampled in-shader)
-    float envScale          = 2.0f;    // spatial frequency of resource patches
-    float envDrift          = 0.00005f; // how fast patches move (per sim tick)
-    float dayNightSpeed     = 0.0003f; // global light cycle speed (0 = off)
+    // Environment (static fBm fields sampled in-shader)
+    float envScale          = 1.0f;    // spatial frequency of resource patches (lower = bigger zones)
+    float envDrift          = 0.0f;    // patches are static (0 = no drift)
+    float dayNightSpeed     = 0.0f;    // global light cycle off (0 = constant daylight)
     float dayFraction       = 0.7f;    // share of each cycle that is daylight (0.5 = equal; >0.5 = longer days)
 
     // World generation
